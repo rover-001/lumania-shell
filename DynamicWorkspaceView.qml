@@ -1,137 +1,105 @@
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import Quickshell.Hyprland
 import Quickshell.Services.Mpris
 import qs.Commons as Commons
 
 Item {
   id: root
 
-  // Adaptive Workspace State
-  property bool hasYouTube: false
-  property string mediaTitle: ""
+  // Media Playback State
+  property bool mprisPlaying: false
+  property bool nonMprisPlaying: false
 
-  // MPRIS Media Playback State
-  readonly property var playersList: Mpris.players ? Mpris.players.values : []
-
-  readonly property bool isPlaying: {
-    if (!playersList || playersList.length === 0) return false
-    for (var i = 0; i < playersList.length; i++) {
-      var p = playersList[i]
-      if (p && p.isPlaying) return true
-    }
-    return false
-  }
-
-  // Active condition: on workspace with media AND media is actively playing (not paused)
-  readonly property bool showVisualizer: hasYouTube && isPlaying
-
-  function cleanTitle(raw) {
-    var t = String(raw || "").trim()
-    t = t.replace(/\s*-\s*YouTube\s*-\s*Chromium$/i, "")
-         .replace(/\s*-\s*YouTube\s*-\s*Firefox$/i, "")
-         .replace(/\s*-\s*YouTube$/i, "")
-         .replace(/^\(\d+\)\s*/, "")
-    return t.trim()
-  }
-
-  function parseWorkspaceInfo(jsonStr) {
-    try {
-      var data = JSON.parse(jsonStr)
-      if (!data) return
-      var title = String(data.lastwindowtitle || "")
-      if (title.toLowerCase().indexOf("youtube") !== -1 || title.toLowerCase().indexOf("spotify") !== -1) {
-        hasYouTube = true
-        mediaTitle = cleanTitle(title)
+  // Reactive evaluation of MPRIS playback across all active players
+  function recheckMpris() {
+    var players = Mpris.players ? Mpris.players.values : []
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i]
+      if (p && p.isPlaying) {
+        root.mprisPlaying = true
         return
       }
-    } catch (e) {}
-    clientsProcess.running = true
+    }
+    root.mprisPlaying = false
   }
 
-  function parseClients(jsonStr) {
-    try {
-      var clients = JSON.parse(jsonStr)
-      if (!Array.isArray(clients)) return
-
-      var currentWs = Hyprland.focusedWorkspace ? Hyprland.focusedWorkspace.id : 1
-      for (var i = 0; i < clients.length; i++) {
-        var c = clients[i]
-        if (c && c.workspace && c.workspace.id === currentWs) {
-          var t = String(c.title || "")
-          var cls = String(c.class || "")
-          if (t.toLowerCase().indexOf("youtube") !== -1 || t.toLowerCase().indexOf("spotify") !== -1 || cls.toLowerCase().indexOf("spotify") !== -1) {
-            hasYouTube = true
-            mediaTitle = cleanTitle(t)
-            return
-          }
-        }
-      }
-      hasYouTube = false
-      mediaTitle = ""
-    } catch (e) {
-      hasYouTube = false
-      mediaTitle = ""
+  // Instantiator tracks each individual MPRIS player's playback state reactively (0ms latency)
+  Instantiator {
+    model: Mpris.players ? Mpris.players.values : []
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onIsPlayingChanged() { root.recheckMpris() }
     }
-  }
-
-  // Poll active workspace & clients
-  Process {
-    id: activeWsProcess
-    command: ["hyprctl", "activeworkspace", "-j"]
-    stdout: StdioCollector {
-      id: activeWsStdout
-      waitForEnd: true
-    }
-    onExited: function(exitCode) {
-      if (exitCode === 0) {
-        root.parseWorkspaceInfo(activeWsStdout.text)
-      }
-    }
-  }
-
-  Process {
-    id: clientsProcess
-    command: ["hyprctl", "clients", "-j"]
-    stdout: StdioCollector {
-      id: clientsStdout
-      waitForEnd: true
-    }
-    onExited: function(exitCode) {
-      if (exitCode === 0) {
-        root.parseClients(clientsStdout.text)
-      }
-    }
-  }
-
-  function refresh() {
-    if (!activeWsProcess.running) {
-      activeWsProcess.running = true
-    }
+    onCountChanged: root.recheckMpris()
   }
 
   Connections {
-    target: Hyprland
-    function onFocusedWorkspaceChanged() {
-      root.refresh()
+    target: Mpris.players
+    function onValuesChanged() { root.recheckMpris() }
+  }
+
+  // Active condition: any MPRIS media playing OR non-MPRIS active audio stream
+  readonly property bool showVisualizer: mprisPlaying || nonMprisPlaying
+
+  property bool sinkCheckPending: false
+
+  function triggerSinkCheck() {
+    if (sinkInputCheck.running) {
+      sinkCheckPending = true
+      return
+    }
+    sinkCheckPending = false
+    sinkInputCheck.running = true
+  }
+
+  // Real-time PipeWire audio event push (sub-millisecond notification on non-MPRIS stream state change)
+  Process {
+    id: pactlSubscriber
+    command: ["pactl", "subscribe"]
+    running: true
+    stdout: SplitParser {
+      onRead: function(line) {
+        var str = String(line || "")
+        if (str.indexOf("sink-input") !== -1 || str.indexOf("sink") !== -1) {
+          root.triggerSinkCheck()
+        }
+      }
     }
   }
 
+  // Check PipeWire active audio stream for non-MPRIS applications (games, audio tools, etc.)
+  // Explicitly excludes lingering uncorked buffers from paused MPRIS browsers and players
+  Process {
+    id: sinkInputCheck
+    command: ["sh", "-c", "pactl list sink-inputs 2>/dev/null | awk 'BEGIN { uncorked=0; mpris=0; count=0 } /Sink Input/ { if (uncorked && !mpris) count++; uncorked=0; mpris=0 } /Corked: no/ { uncorked=1 } tolower($0) ~ /application\\.name = \"(chromium|chrome|firefox|zen|brave|opera|vivaldi|spotify|mpv|vlc|amberol)/ { mpris=1 } END { if (uncorked && !mpris) count++; if (count > 0) exit 0; exit 1 }'"]
+    onExited: function(code) {
+      root.nonMprisPlaying = (code === 0)
+      if (root.sinkCheckPending) {
+        root.sinkCheckPending = false
+        sinkInputCheck.running = true
+      }
+    }
+  }
+
+  // Fast fallback polling for non-MPRIS audio
   Timer {
-    interval: 1200
+    interval: root.nonMprisPlaying ? 300 : 1000
     running: true
     repeat: true
-    onTriggered: root.refresh()
+    onTriggered: {
+      root.recheckMpris()
+      root.triggerSinkCheck()
+    }
   }
 
   Component.onCompleted: {
-    refresh()
+    root.recheckMpris()
+    root.triggerSinkCheck()
   }
 
   // --- Dynamic Waveform Centered in Island ---
-  anchors.fill: parent
-
   MediaWaveform {
     id: waveform
     anchors.centerIn: parent

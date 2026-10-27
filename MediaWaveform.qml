@@ -16,9 +16,9 @@ Item {
   property var barHeights: []
   property var barColors: []
 
-  // Symmetrical center-out gradient (Center: Electric Cyan -> Outer wings: Neon Violet)
-  property color startColor: "#00f0ff"
-  property color endColor: "#b026ff"
+  // Harmonious gradient for #a7474f bar (Center: Solid White -> Outer wings: Soft White)
+  property color startColor: "#ffffff"
+  property color endColor: Qt.rgba(1, 1, 1, 0.70)
 
   // Spring motion: every bar is a damped spring chasing its target from the visualizer.
   // Rising is stiffer and slightly underdamped (a small springy overshoot),
