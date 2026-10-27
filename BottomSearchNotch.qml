@@ -17,18 +17,27 @@ Item {
   property color notchColor: frameConfig.activeBorderColor
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   property var shell: null
-  property bool isOpen: false       // Manual open from keybind or IPC
+  property bool isOpen: false       // Manual open from keybind or IPC (owned by the host)
   property bool isHoverOpen: false  // Hover open from mouse interaction
+  // Local open request. Never assigned to isOpen: writing isOpen here would
+  // destroy the host's `isOpen: root.searchOpen` binding, which permanently
+  // disconnected the notch from the IPC/keybind state after the first Esc.
+  property bool requestedOpen: false
+  // Set after an explicit dismissal so a pointer that is still over the panel
+  // cannot instantly re-open it.
+  property bool hoverSuppressed: false
 
   readonly property bool isHovered: Boolean(notchHover && notchHover.hovered)
   readonly property bool isTyping: Boolean(searchInput && searchInput.text.length > 0)
-  readonly property bool isOpenEffective: root.isOpen || root.isHoverOpen || isHovered || isTyping
+  readonly property bool isOpenEffective: root.isOpen || root.requestedOpen
+    || (!root.hoverSuppressed && (root.isHoverOpen || root.isHovered))
+    || root.isTyping
 
   signal openRequested()
   signal closeRequested()
 
   function open() {
-    root.isOpen = true
+    root.requestedOpen = true
     root.openRequested()
     refreshApps()
     Qt.callLater(function() {
@@ -40,8 +49,9 @@ Item {
   }
 
   function close() {
-    root.isOpen = false
+    root.requestedOpen = false
     root.isHoverOpen = false
+    root.hoverSuppressed = root.isHovered
     root.closeRequested()
     if (searchInput) {
       searchInput.text = ""
@@ -52,6 +62,11 @@ Item {
   function toggle() {
     if (root.isOpenEffective) root.close()
     else root.open()
+  }
+
+  // Host-driven close (IPC / fullscreen) must also drop a pending local request
+  onIsOpenChanged: {
+    if (!root.isOpen) root.requestedOpen = false
   }
 
   onIsOpenEffectiveChanged: {
@@ -73,7 +88,8 @@ Item {
   // Sizing bounds driven by FrameConfig
   readonly property real collapsedWidth: frameConfig.searchCollapsedWidth
   readonly property real expandedWidth: frameConfig.searchExpandedWidth
-  readonly property real collapsedHeight: root.borderThickness + frameConfig.searchCollapsedHeight
+  readonly property real collapsedHeight: root.borderThickness
+    + Math.max(frameConfig.searchCollapsedHeight, frameConfig.searchLeftTabHeight)
   readonly property real expandedHeight: root.borderThickness + frameConfig.searchExpandedHeight
 
   // Flare & corner radii adapting dynamically with openProgress
@@ -88,9 +104,10 @@ Item {
 
   Behavior on openProgress {
     NumberAnimation {
-      duration: root.isOpenEffective ? 380 : 260
+      duration: root.isOpenEffective ? frameConfig.searchOpenDuration
+                                     : frameConfig.searchCloseDuration
       easing.type: root.isOpenEffective ? Easing.OutBack : Easing.OutCubic
-      easing.overshoot: root.isOpenEffective ? 1.08 : 1.0
+      easing.overshoot: root.isOpenEffective ? frameConfig.searchOpenOvershoot : 1.0
     }
   }
 
@@ -98,11 +115,11 @@ Item {
   // Width & height stretch smoothly with a sinusoidal volume pulse mid-transition
   readonly property real currentWidth: collapsedWidth
     + (openProgress * (expandedWidth - collapsedWidth))
-    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * 10.0)
+    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * frameConfig.searchWidthPulse)
 
   readonly property real currentHeight: collapsedHeight
     + (openProgress * (expandedHeight - collapsedHeight))
-    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * 6.0)
+    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * frameConfig.searchHeightPulse)
 
   // Exposed items for PanelWindow masking
   property alias maskItem: notchContainer
@@ -294,6 +311,22 @@ Item {
     Quickshell.execDetached(["gtk-launch", item.id + ".desktop"])
   }
 
+  // -------------------------------------------------------------------------
+  // Power Actions
+  // -------------------------------------------------------------------------
+  readonly property var powerActions: [
+    { glyph: "󰒲", label: "Suspend", command: ["systemctl", "suspend"] },          // zzz
+    { glyph: "󰖔", label: "Hibernate", command: ["systemctl", "hibernate"] },      // moon + stars
+    { glyph: "󰜉", label: "Restart", command: ["systemctl", "reboot"] },           // circular arrow
+    { glyph: "󰐥", label: "Power off", command: ["systemctl", "poweroff"] }        // power
+  ]
+
+  function runPowerAction(command) {
+    if (!command) return
+    root.close()
+    Quickshell.execDetached(command)
+  }
+
   Component.onCompleted: {
     refreshApps()
   }
@@ -322,19 +355,23 @@ Item {
   }
 
   // =========================================================================
-  // Centered Bottom Notch Container
+  // Bottom-Left Anchored Notch Container (merged into left + bottom borders)
   // =========================================================================
   Item {
     id: notchContainer
     anchors.bottom: parent.bottom
-    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.left: parent.left
+    // Flush to the screen's left edge so the notch owns the left border band:
+    // hovering anywhere on the far-left bottom corner opens it.
+    anchors.leftMargin: 0
 
     width: root.currentWidth
     height: root.currentHeight
 
-    // OLED Theme Color Animation
+    // OLED Theme Color: follows the theme tone instantly.
+    // The host (IslandBar) already animates islandColor over 500ms, so a second
+    // Behaviour here would chain two animations and make the notch visibly lag.
     property color activeColor: root.notchColor
-    Behavior on activeColor { ColorAnimation { duration: 400 } }
 
     // Hover handler for effortless blooming interaction
     HoverHandler {
@@ -342,13 +379,17 @@ Item {
       cursorShape: (!root.isOpenEffective) ? Qt.PointingHandCursor : Qt.ArrowCursor
       onHoveredChanged: {
         if (hovered) {
+          root.hoverSuppressed = false
           root.isHoverOpen = true
           root.refreshApps()
           Qt.callLater(function() {
             if (searchInput) searchInput.forceActiveFocus()
           })
-        } else if (!root.isOpen && !root.isTyping) {
-          root.isHoverOpen = false
+        } else {
+          if (!root.isOpen && !root.requestedOpen && !root.isTyping) {
+            root.isHoverOpen = false
+          }
+          root.hoverSuppressed = false
         }
       }
     }
@@ -356,7 +397,7 @@ Item {
     // Tactile press state when resting
     property bool isPillPressed: restingTapHandler.pressed
     scale: (!root.isOpenEffective && isPillPressed) ? 0.96 : 1.0
-    transformOrigin: Item.Bottom
+    transformOrigin: Item.BottomLeft
 
     Behavior on scale {
       NumberAnimation {
@@ -367,25 +408,35 @@ Item {
     }
 
     // -----------------------------------------------------------------------
-    // G1 Continuous Squircle Notch Shape (Mirrors top Dynamic Island)
+    // Resting "C" gusset: a tall finger up the LEFT border joined to a low
+    // strip along the BOTTOM border. Both are part of the same silhouette, so
+    // the corner reads as one merged piece of the frame.
     // -----------------------------------------------------------------------
     Shape {
-      id: notchShape
+      id: gussetShape
       anchors.fill: parent
+      visible: root.openProgress < 0.05
       preferredRendererType: Shape.CurveRenderer
 
       readonly property real w: notchContainer.width
       readonly property real h: notchContainer.height
-      readonly property real rFlare: root.currentFlareRadius
-      readonly property real rCorner: root.currentCornerRadius
       readonly property real b: root.borderThickness
-
-      // Available protrusion above the bottom border's top edge
-      readonly property real protrusion: Math.max(0, h - b)
-      // G1 squircle continuity: flare and corner partition the protrusion so the
-      // resting notch never self-intersects (no kinks / cut corners)
-      readonly property real effRf: Math.min(rFlare, Math.max(0.5, protrusion * 0.38))
-      readonly property real effRc: Math.max(0, Math.min(rCorner, protrusion - effRf))
+      // Top edge of the low part that hugs the bottom border
+      readonly property real stripTop: h - b - frameConfig.searchCollapsedHeight
+      // Vertical finger hugging the left border
+      readonly property real tabW: Math.max(2, Math.min(frameConfig.searchLeftTabWidth,
+                                                        w * frameConfig.searchTabWidthMaxRatio))
+      readonly property real tabTop: Math.max(0, h - b - frameConfig.searchLeftTabHeight)
+      readonly property real rTab: Math.max(0, Math.min(frameConfig.searchTabCapRadius,
+                                                        tabW * 0.5,
+                                                        (stripTop - tabTop) * 0.45))
+      readonly property real fillet: Math.max(0, Math.min(frameConfig.searchInnerRadius,
+                                                          stripTop - tabTop))
+      readonly property real rCorner: Math.max(0, Math.min(frameConfig.searchCornerRadius,
+                                                           (h - stripTop) * frameConfig.searchLipCornerRatio))
+      readonly property real stripEnd: Math.max(tabW + fillet + 1, w - rCorner)
+      // Bezier pull of the concave fillet (shared with every flare below)
+      readonly property real slack: 1.0 - frameConfig.searchCurveTension
 
       ShapePath {
         strokeWidth: 0
@@ -394,69 +445,160 @@ Item {
         capStyle: ShapePath.RoundCap
         joinStyle: ShapePath.RoundJoin
 
-        // Start at bottom-left below screen edge for zero-bleed seal
+        // Start below the bottom edge for a zero-bleed seal
+        startX: 0
+        startY: gussetShape.h + 2.0
+
+        // Up the left edge (fully covers the left border band)
+        PathLine {
+          x: 0
+          y: gussetShape.tabTop + gussetShape.rTab
+        }
+
+        // Rounded finger top
+        PathCubic {
+          x: gussetShape.tabW
+          y: gussetShape.tabTop + gussetShape.rTab
+          control1X: 0
+          control1Y: gussetShape.tabTop
+          control2X: gussetShape.tabW
+          control2Y: gussetShape.tabTop
+        }
+
+        // Down the finger's inner face
+        PathLine {
+          x: gussetShape.tabW
+          y: gussetShape.stripTop - gussetShape.fillet
+        }
+
+        // Concave fillet: finger melts into the bottom strip (the "C" mouth)
+        PathCubic {
+          x: gussetShape.tabW + gussetShape.fillet
+          y: gussetShape.stripTop
+          control1X: gussetShape.tabW
+          control1Y: gussetShape.stripTop - gussetShape.fillet * gussetShape.slack
+          control2X: gussetShape.tabW + gussetShape.fillet * gussetShape.slack
+          control2Y: gussetShape.stripTop
+        }
+
+        // Strip top edge
+        PathLine {
+          x: gussetShape.stripEnd
+          y: gussetShape.stripTop
+        }
+
+        // Rounded right end of the strip
+        PathArc {
+          x: gussetShape.w
+          y: gussetShape.stripTop + gussetShape.rCorner
+          radiusX: gussetShape.rCorner
+          radiusY: gussetShape.rCorner
+          direction: PathArc.Clockwise
+        }
+
+        // Down past the bottom edge for a zero-bleed seal
+        PathLine {
+          x: gussetShape.w
+          y: gussetShape.h + 2.0
+        }
+
+        // Close along the bottom
+        PathLine {
+          x: 0
+          y: gussetShape.h + 2.0
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // Corner Gusset Shape: merges into BOTH the left border and bottom border
+    // - left edge   : flush against the left border's inner face
+    // - bottom edge : flush into the bottom border band
+    // - top-left    : concave flare melting out of the left border
+    // - top-right   : free convex corner
+    // - right       : concave flare melting into the bottom border
+    // -----------------------------------------------------------------------
+    Shape {
+      id: notchShape
+      anchors.fill: parent
+      visible: root.openProgress >= 0.05
+      preferredRendererType: Shape.CurveRenderer
+
+      readonly property real w: notchContainer.width
+      readonly property real h: notchContainer.height
+      readonly property real rFlare: root.currentFlareRadius
+      readonly property real rCorner: root.currentCornerRadius
+      readonly property real b: root.borderThickness
+
+      // Vertical space available above the bottom border's top edge
+      readonly property real protrusion: Math.max(0, h - b)
+      // G1 continuity: the free corner and the bottom flare share the protrusion
+      // so the resting gusset can never self-intersect (no kinks / cut corners)
+      readonly property real effRfL: Math.max(0.5, rFlare)
+      readonly property real effRfR: Math.min(rFlare, Math.max(0.5, protrusion * frameConfig.searchLipFlareMaxRatio))
+      readonly property real effRc: Math.max(0, Math.min(rCorner, protrusion - effRfR))
+      // Horizontal guard: keep the top edge from inverting on narrow widths
+      readonly property real topStart: Math.min(effRfL, w * frameConfig.searchTopEdgeGuardRatio)
+      readonly property real topEnd: Math.max(topStart + 1, w - effRfR - effRc)
+      // Bezier pull of the concave flares
+      readonly property real slack: 1.0 - frameConfig.searchCurveTension
+
+      ShapePath {
+        strokeWidth: 0
+        strokeColor: "transparent"
+        fillColor: notchContainer.activeColor
+        capStyle: ShapePath.RoundCap
+        joinStyle: ShapePath.RoundJoin
+
+        // Start below the bottom edge for a zero-bleed seal with the border band
         startX: 0
         startY: notchShape.h + 2.0
 
-        // Vertical line up to bottom border top edge
+        // Up the left edge and past the top edge: the flare grows out of the
+        // left border, so the shoulder sits above the notch's own top edge
         PathLine {
           x: 0
-          y: notchShape.h - notchShape.b
+          y: -notchShape.effRfL
         }
 
-        // Left concave flare curving smoothly from horizontal border upwards
+        // Top-left concave flare: left border sweeps out into the notch top edge
         PathCubic {
-          x: notchShape.effRf
-          y: notchShape.h - notchShape.b - notchShape.effRf
-          control1X: notchShape.effRf * 0.5
-          control1Y: notchShape.h - notchShape.b
-          control2X: notchShape.effRf
-          control2Y: notchShape.h - notchShape.b - (notchShape.effRf * 0.5)
-        }
-
-        // Left vertical side up to top-left corner arc
-        PathLine {
-          x: notchShape.effRf
-          y: notchShape.effRc
-        }
-
-        // Top-left convex corner arc
-        PathArc {
-          x: notchShape.effRf + notchShape.effRc
+          x: notchShape.topStart
           y: 0
-          radiusX: Math.max(1, notchShape.effRc)
-          radiusY: Math.max(1, notchShape.effRc)
-          direction: PathArc.Clockwise
+          control1X: 0
+          control1Y: -notchShape.effRfL * notchShape.slack
+          control2X: notchShape.topStart * frameConfig.searchCurveTension
+          control2Y: 0
         }
 
         // Top horizontal edge
         PathLine {
-          x: notchShape.w - notchShape.effRf - notchShape.effRc
+          x: notchShape.topEnd
           y: 0
         }
 
-        // Top-right convex corner arc
+        // Free top-right convex corner arc
         PathArc {
-          x: notchShape.w - notchShape.effRf
+          x: notchShape.topEnd + notchShape.effRc
           y: notchShape.effRc
           radiusX: Math.max(1, notchShape.effRc)
           radiusY: Math.max(1, notchShape.effRc)
           direction: PathArc.Clockwise
         }
 
-        // Right vertical side down to right flare
+        // Right side down to the bottom border's top edge
         PathLine {
-          x: notchShape.w - notchShape.effRf
-          y: notchShape.h - notchShape.b - notchShape.effRf
+          x: notchShape.w - notchShape.effRfR
+          y: notchShape.h - notchShape.b - notchShape.effRfR
         }
 
-        // Right concave flare curving smoothly back down to horizontal border
+        // Right concave flare: notch melts back down into the bottom border
         PathCubic {
           x: notchShape.w
           y: notchShape.h - notchShape.b
-          control1X: notchShape.w - notchShape.effRf
-          control1Y: notchShape.h - notchShape.b - (notchShape.effRf * 0.5)
-          control2X: notchShape.w - (notchShape.effRf * 0.5)
+          control1X: notchShape.w - notchShape.effRfR
+          control1Y: notchShape.h - notchShape.b - (notchShape.effRfR * notchShape.slack)
+          control2X: notchShape.w - (notchShape.effRfR * notchShape.slack)
           control2Y: notchShape.h - notchShape.b
         }
 
@@ -502,13 +644,14 @@ Item {
       anchors.fill: parent
       anchors.topMargin: 12
       anchors.bottomMargin: root.borderThickness + 8
-      anchors.leftMargin: root.currentFlareRadius + 8
+      // Container sits on the left border, so inset content from the border face
+      anchors.leftMargin: root.borderThickness + 14
       anchors.rightMargin: root.currentFlareRadius + 8
 
       visible: opacity > 0.01
       opacity: root.openProgress
       scale: 0.94 + (0.06 * root.openProgress)
-      transformOrigin: Item.Bottom
+      transformOrigin: Item.BottomLeft
 
       ColumnLayout {
         anchors.fill: parent
@@ -766,6 +909,79 @@ Item {
                 font.pixelSize: 11
                 color: frameConfig.mutedColor
                 renderType: Text.NativeRendering
+              }
+            }
+          }
+        }
+
+        // Power Actions Footer (Suspend / Hibernate / Restart / Power off)
+        Item {
+          Layout.fillWidth: true
+          Layout.preferredHeight: frameConfig.searchFooterHeight
+
+          Rectangle {
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            height: 1
+            color: Qt.rgba(255, 255, 255, 0.10)
+          }
+
+          Row {
+            anchors.left: parent.left
+            anchors.top: parent.top
+            anchors.topMargin: 14
+            spacing: 16
+
+            Repeater {
+              model: root.powerActions
+
+              delegate: Column {
+                spacing: 6
+
+                Rectangle {
+                  id: powerButton
+                  width: frameConfig.searchPowerButtonSize
+                  height: frameConfig.searchPowerButtonSize
+                  radius: width / 2
+                  anchors.horizontalCenter: parent.horizontalCenter
+
+                  color: powerArea.containsMouse
+                    ? Qt.rgba(1, 1, 1, 0.28)
+                    : frameConfig.powerButtonInactiveBg
+                  scale: powerArea.pressed ? 0.92 : 1.0
+
+                  Behavior on color { ColorAnimation { duration: 180 } }
+                  Behavior on scale {
+                    NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
+                  }
+
+                  Text {
+                    anchors.centerIn: parent
+                    text: modelData.glyph
+                    font.family: root.iconFont
+                    font.pixelSize: 19
+                    color: frameConfig.powerButtonInactiveIcon
+                    renderType: Text.NativeRendering
+                  }
+
+                  MouseArea {
+                    id: powerArea
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: root.runPowerAction(modelData.command)
+                  }
+                }
+
+                Text {
+                  anchors.horizontalCenter: parent.horizontalCenter
+                  text: modelData.label
+                  font.family: root.fontFamily
+                  font.pixelSize: 9
+                  color: frameConfig.mutedColor
+                  renderType: Text.NativeRendering
+                }
               }
             }
           }

@@ -2,6 +2,8 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Shapes
 import Quickshell
+import Quickshell.Io
+import Quickshell.Services.Mpris
 import qs.Commons as Commons
 import qs.Ui
 
@@ -23,8 +25,6 @@ Item {
   readonly property int islandWidth: bodyWidth + (topCurveRadius * 2)
   readonly property int islandHeight: borderThickness + 32
   readonly property int bottomCornerRadius: frameConfig.islandBottomCornerRadius
-  readonly property int hoverWidthDelta: 220
-  readonly property int hoverHeightDelta: 14
 
   // Mask items exposed to PanelWindow
   readonly property Item islandMaskItem: islandContainer
@@ -53,20 +53,75 @@ Item {
     onTriggered: root.updateClock()
   }
 
+  // -------------------------------------------------------------
+  // MPRIS Media Detection & Track Capability Evaluation
+  // -------------------------------------------------------------
+  function getActivePlayer() {
+    var players = Mpris.players ? Mpris.players.values : []
+    // 1. Any player actively playing with track metadata or skip capabilities
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i]
+      if (p && p.isPlaying && (p.trackTitle || p.trackArtist || p.canGoNext || p.canGoPrevious)) {
+        return p
+      }
+    }
+    // 2. Any player actively playing
+    for (var j = 0; j < players.length; j++) {
+      var q = players[j]
+      if (q && q.isPlaying) return q
+    }
+    // 3. Any player with metadata
+    for (var k = 0; k < players.length; k++) {
+      var r = players[k]
+      if (r && (r.trackTitle || r.trackArtist)) return r
+    }
+    return players.length > 0 ? players[0] : null
+  }
+
+  readonly property var activePlayer: getActivePlayer()
+
+  // Video or song (has track metadata or skip capabilities), not a call or general audio
+  readonly property bool isSkippable: Boolean(
+    activePlayer && (
+      activePlayer.canGoNext ||
+      activePlayer.canGoPrevious ||
+      (activePlayer.trackTitle && activePlayer.trackTitle.length > 0)
+    )
+  )
+
+  Instantiator {
+    model: Mpris.players ? Mpris.players.values : []
+    delegate: Connections {
+      required property var modelData
+      target: modelData
+      function onIsPlayingChanged() { root.activePlayerChanged() }
+      function onTrackTitleChanged() { root.activePlayerChanged() }
+      function onCanGoNextChanged() { root.activePlayerChanged() }
+      function onCanGoPreviousChanged() { root.activePlayerChanged() }
+    }
+  }
+
+  Connections {
+    target: Mpris.players
+    function onValuesChanged() { root.activePlayerChanged() }
+  }
+
+  // -------------------------------------------------------------
   // Centered Dynamic Island Notch with Smooth Animated Sizing
+  // -------------------------------------------------------------
   Item {
     id: islandContainer
     anchors.top: parent.top
     anchors.horizontalCenter: parent.horizontalCenter
 
-    // Hover interaction state (stays active when subpanel is open, hovered, or pinned)
-    readonly property bool isHovered: hoverHandler.hovered || (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
+    // Hover interaction state (stays active while subpanel is open, hovered, or pinned)
+    readonly property bool isHovered: islandHover.hovered || (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
     // iOS Fluid Spring Behavior for hover
-    // Expanding (hover in): snappy energetic spring (400ms, OutBack overshoot 1.08)
-    // Collapsing (hover out): critically damped graceful settle (280ms, OutCubic)
+    // Expanding: snappy energetic spring (400ms, OutBack overshoot 1.08)
+    // Collapsing: critically damped graceful settle (280ms, OutCubic)
     Behavior on hoverProgress {
       NumberAnimation {
         duration: islandContainer.isHovered ? 400 : 280
@@ -81,7 +136,7 @@ Item {
 
     Behavior on transitionProgress {
       NumberAnimation {
-        duration: dynamicView.showVisualizer ? 340 : 180
+        duration: dynamicView.showVisualizer ? 380 : 220
         easing.type: dynamicView.showVisualizer ? Easing.OutBack : Easing.OutCubic
         easing.overshoot: dynamicView.showVisualizer ? 1.15 : 1.0
       }
@@ -93,16 +148,21 @@ Item {
     readonly property real currentBottomRadius: root.bottomCornerRadius
       + (hoverProgress * (root.frameConfig.islandExpandedBottomCornerRadius - root.bottomCornerRadius))
 
+    // Height expansion delta: taller when idle (+42px down to 79px) to fit 48px circles,
+    // and sleek when media is playing (+24px down to 61px) to fit 44px media controls
+    readonly property real activeHoverHeightDelta: dynamicView.showVisualizer
+      ? root.frameConfig.islandHoverHeightDeltaMedia
+      : root.frameConfig.islandHoverHeightDeltaIdle
+
     // Authentic iOS liquid stretch:
-    // 1. Pill widens symmetrically (+220px) on hover (left and right)
-    // 2. Liquid volume pulse during mid-transition (sin curve)
+    // Pill widens symmetrically (+140px) on hover with liquid volume pulse during transitions
     width: root.islandWidth
-      + (hoverProgress * root.hoverWidthDelta)
+      + (hoverProgress * root.frameConfig.islandHoverWidthDelta)
       + (Math.sin(Math.min(1.0, Math.max(0.0, transitionProgress)) * Math.PI) * 8.0)
       + (Math.sin(Math.min(1.0, Math.max(0.0, hoverProgress)) * Math.PI) * 6.0)
 
-    // Height expands downwards (+14px) on hover
-    height: root.islandHeight + (hoverProgress * root.hoverHeightDelta)
+    // Height expands downwards on hover (+42px idle, +24px media)
+    height: root.islandHeight + (hoverProgress * activeHoverHeightDelta)
 
     // Press feedback: instant scale-down to 0.96 on press, spring pop back on release
     property bool isPressed: tapHandler.pressed
@@ -118,12 +178,13 @@ Item {
     }
 
     HoverHandler {
-      id: hoverHandler
+      id: islandHover
       cursorShape: Qt.PointingHandCursor
     }
 
     TapHandler {
       id: tapHandler
+      enabled: !islandContainer.isHovered && !dynamicView.showVisualizer
       onTapped: {
         root.use24Hour = !root.use24Hour
         root.updateClock()
@@ -181,7 +242,7 @@ Item {
           y: islandShape.h - islandShape.rBot
         }
 
-        // Bottom-right inward curve (full 15px pill arc)
+        // Bottom-right inward curve (full pill arc)
         PathArc {
           x: islandShape.w - islandShape.rTop - islandShape.rBot
           y: islandShape.h
@@ -196,7 +257,7 @@ Item {
           y: islandShape.h
         }
 
-        // Bottom-left inward curve (full 15px pill arc)
+        // Bottom-left inward curve (full pill arc)
         PathArc {
           x: islandShape.rTop
           y: islandShape.h - islandShape.rBot
@@ -229,17 +290,48 @@ Item {
       }
     }
 
-    // Content Layer 1: Resting View (ONLY TIME DISPLAYED AT REST)
+    // =========================================================================
+    // Content Layer 1: Standard Outside View (Day, Date, Time)
+    // Matches commit 149d0b0. Zero bleed: instantly hidden on hover.
+    // =========================================================================
     Row {
       id: clockContentRow
-      anchors.centerIn: parent
-      anchors.verticalCenterOffset: (islandContainer.hoverProgress * 4.0) + (-5.0 * islandContainer.transitionProgress)
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.verticalCenterOffset: -5.0 * islandContainer.transitionProgress
+      spacing: 8
 
-      // Crossfades cleanly; transitions into expanded controls as hover begins
-      opacity: Math.max(0.0, (1.0 - islandContainer.transitionProgress) * (1.0 - islandContainer.hoverProgress * 3.0))
-      scale: Math.max(0.80, (1.0 - islandContainer.transitionProgress * 0.16) * (1.0 - islandContainer.hoverProgress * 0.2))
-      visible: opacity > 0.01
+      // Transitions out when audio starts or when hovered/opened
+      opacity: (!islandContainer.isHovered && islandContainer.hoverProgress < 0.02)
+        ? Math.max(0.0, 1.0 - islandContainer.transitionProgress * 2.2)
+        : 0.0
+      scale: Math.max(0.82, 1.0 - islandContainer.transitionProgress * 0.16)
+      visible: opacity > 0.01 && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02
       transformOrigin: Item.Center
+
+      Behavior on opacity {
+        NumberAnimation { duration: 140 }
+      }
+
+      Text {
+        id: dateLabel
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.currentDateString
+        color: root.islandMutedColor
+        font.family: root.fontFamily
+        font.pixelSize: 12
+        font.weight: Font.Medium
+        renderType: Text.NativeRendering
+        verticalAlignment: Text.AlignVCenter
+      }
+
+      Rectangle {
+        anchors.verticalCenter: parent.verticalCenter
+        width: 3
+        height: 3
+        radius: 1.5
+        color: Qt.rgba(root.islandTextColor.r, root.islandTextColor.g, root.islandTextColor.b, 0.35)
+      }
 
       Text {
         id: timeLabel
@@ -254,271 +346,422 @@ Item {
       }
     }
 
-    // Content Layer 2: Adaptive Workspace View (Multi-Color Gradient Audio Waveform)
+    // =========================================================================
+    // Content Layer 2: Adaptive Audio Visualizer (Multi-Color Gradient Waveform)
+    // Active when video/song or audio stream is playing. Hidden when opened.
+    // =========================================================================
     DynamicWorkspaceView {
       id: dynamicView
       anchors.fill: parent
 
-      opacity: islandContainer.transitionProgress * Math.max(0.0, 1.0 - islandContainer.hoverProgress * 3.0)
+      opacity: (!islandContainer.isHovered && islandContainer.hoverProgress < 0.02)
+        ? Math.min(1.0, Math.max(0.0, (islandContainer.transitionProgress - 0.25) * 1.33))
+        : 0.0
       scale: 0.82 + (0.18 * islandContainer.transitionProgress)
-      visible: opacity > 0.01
+      y: 4.0 * (1.0 - islandContainer.transitionProgress)
+      visible: opacity > 0.01 && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02
       transformOrigin: Item.Center
+
+      Behavior on opacity {
+        NumberAnimation { duration: 140 }
+      }
     }
 
-    // Content Layer 3: Expanded Interactive Notch Controls (Revealed on Hover)
-    Item {
-      id: expandedControlsRow
-      anchors.fill: parent
-      anchors.leftMargin: 16
-      anchors.rightMargin: 16
-      opacity: Math.min(1.0, islandContainer.hoverProgress * 2.0)
-      scale: 0.90 + (0.10 * islandContainer.hoverProgress)
-      visible: opacity > 0.01
+    // =========================================================================
+    // Content Layer 3A: Opened During Media Playback (Skip / Play / Pause Controls)
+    // When watching videos or songs: shows Skip Left, Play/Pause, Skip Right
+    // When on calls or general streams: shows only Play/Pause (no skip buttons)
+    // =========================================================================
+    Row {
+      id: mediaControlsRow
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.borderThickness * 0.5
+      spacing: 18
+      opacity: (islandContainer.hoverProgress > 0.15 && dynamicView.showVisualizer)
+        ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
+        : 0.0
+      scale: 0.88 + (0.12 * islandContainer.hoverProgress)
+      visible: opacity > 0.01 && dynamicView.showVisualizer
       transformOrigin: Item.Center
 
-      RowLayout {
-        anchors.fill: parent
-        spacing: 10
+      // 1. Skip Previous Track (Shown only for videos/songs, hidden on calls)
+      Rectangle {
+        id: btnPrev
+        visible: root.isSkippable
+        width: 38
+        height: 38
+        radius: 19
+        anchors.verticalCenter: parent.verticalCenter
 
-        // Left: Time & Date in Opened Notch
-        Row {
-          spacing: 6
-          Layout.alignment: Qt.AlignVCenter
+        readonly property bool isPressed: prevArea.pressed
+        scale: isPressed ? 0.90 : (prevArea.containsMouse ? 1.08 : 1.0)
+        color: prevArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
 
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: root.currentTimeString
-            color: root.islandTextColor
-            font.family: root.fontFamily
-            font.pixelSize: 13
-            font.weight: Font.DemiBold
-            renderType: Text.NativeRendering
-          }
-
-          Text {
-            anchors.verticalCenter: parent.verticalCenter
-            text: "• " + root.currentDateString
-            color: root.islandMutedColor
-            font.family: root.fontFamily
-            font.pixelSize: 11
-            font.weight: Font.Medium
-            renderType: Text.NativeRendering
-            visible: islandContainer.width > 310
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnPrev.isPressed ? 120 : 240
+            easing.type: btnPrev.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
           }
         }
-
-        Item {
-          Layout.fillWidth: true
+        Behavior on color {
+          ColorAnimation { duration: 180 }
         }
 
-        // Right: WiFi, Bluetooth, and DNS in Circular Buttons
-        Row {
-          spacing: 8
-          Layout.alignment: Qt.AlignVCenter
+        Text {
+          anchors.centerIn: parent
+          text: "󰒮" // Material Skip Previous
+          font.family: root.iconFont
+          font.pixelSize: 18
+          color: root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
 
-          // 1. Wi-Fi Circular Button
-          Rectangle {
-            id: wifiCircle
-            width: 30
-            height: 30
-            radius: 15
-            anchors.verticalCenter: parent.verticalCenter
-            readonly property bool isActiveTab: statusSubpanel.isOpen && statusSubpanel.activeTab === "wifi"
-            color: isActiveTab
-              ? root.frameConfig.activeBorderColor
-              : (wifiHover.hovered ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.10))
-
-            property bool isPressed: wifiTap.pressed
-            scale: isPressed ? 0.90 : (wifiHover.hovered ? 1.08 : 1.0)
-
-            Behavior on scale {
-              NumberAnimation {
-                duration: wifiCircle.isPressed ? 120 : 240
-                easing.type: wifiCircle.isPressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
+        MouseArea {
+          id: prevArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            if (root.activePlayer && root.activePlayer.canGoPrevious) {
+              root.activePlayer.previous()
             }
+          }
+        }
+      }
 
-            Behavior on color {
-              ColorAnimation { duration: 180 }
-            }
+      // 2. Play / Pause Hero Button
+      Rectangle {
+        id: btnPlayPause
+        width: 44
+        height: 44
+        radius: 22
+        anchors.verticalCenter: parent.verticalCenter
 
-            Text {
-              anchors.centerIn: parent
-              text: {
-                if (!statusSubpanel.wifiData.enabled) return "󰤮"
-                if (!statusSubpanel.wifiData.connected) return "󰤯"
-                var sig = statusSubpanel.wifiData.signal || 50
-                if (sig > 75) return "󰤨"
-                if (sig > 50) return "󰤥"
-                if (sig > 25) return "󰤢"
-                return "󰤟"
-              }
-              font.family: root.iconFont
-              font.pixelSize: 15
-              color: wifiCircle.isActiveTab ? root.islandColor : root.islandTextColor
-              renderType: Text.NativeRendering
-            }
+        readonly property bool isPlaying: Boolean(root.activePlayer && root.activePlayer.isPlaying)
+        readonly property bool isPressed: playPauseArea.pressed
+        scale: isPressed ? 0.90 : (playPauseArea.containsMouse ? 1.08 : 1.0)
 
-            HoverHandler {
-              id: wifiHover
-              onHoveredChanged: {
-                if (hovered) {
-                  statusSubpanel.activeTab = "wifi"
-                  statusSubpanel.isOpen = true
-                }
-              }
-            }
+        color: isPlaying
+          ? root.frameConfig.powerButtonActiveBg
+          : (playPauseArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
 
-            TapHandler {
-              id: wifiTap
-              onTapped: {
-                statusSubpanel.activeTab = "wifi"
-                statusSubpanel.isPinned = !statusSubpanel.isPinned
-                if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnPlayPause.isPressed ? 120 : 240
+            easing.type: btnPlayPause.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color {
+          ColorAnimation { duration: 180 }
+        }
+
+        Text {
+          anchors.centerIn: parent
+          text: btnPlayPause.isPlaying ? "󰏤" : "󰐊" // Pause vs Play
+          font.family: root.iconFont
+          font.pixelSize: 22
+          color: btnPlayPause.isPlaying ? root.frameConfig.powerButtonActiveIcon : root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: playPauseArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            if (root.activePlayer) {
+              if (root.activePlayer.canTogglePlaying) {
+                root.activePlayer.togglePlaying()
+              } else if (root.activePlayer.isPlaying && root.activePlayer.canPause) {
+                root.activePlayer.pause()
+              } else if (root.activePlayer.canPlay) {
+                root.activePlayer.play()
               }
             }
           }
+        }
+      }
 
-          // 2. Bluetooth Circular Button
-          Rectangle {
-            id: btCircle
-            width: 30
-            height: 30
-            radius: 15
-            anchors.verticalCenter: parent.verticalCenter
-            readonly property bool isActiveTab: statusSubpanel.isOpen && statusSubpanel.activeTab === "bluetooth"
-            color: isActiveTab
-              ? root.frameConfig.activeBorderColor
-              : (btHover.hovered ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.10))
+      // 3. Skip Next Track (Shown only for videos/songs, hidden on calls)
+      Rectangle {
+        id: btnNext
+        visible: root.isSkippable
+        width: 38
+        height: 38
+        radius: 19
+        anchors.verticalCenter: parent.verticalCenter
 
-            property bool isPressed: btTap.pressed
-            scale: isPressed ? 0.90 : (btHover.hovered ? 1.08 : 1.0)
+        readonly property bool isPressed: nextArea.pressed
+        scale: isPressed ? 0.90 : (nextArea.containsMouse ? 1.08 : 1.0)
+        color: nextArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
 
-            Behavior on scale {
-              NumberAnimation {
-                duration: btCircle.isPressed ? 120 : 240
-                easing.type: btCircle.isPressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
-            }
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnNext.isPressed ? 120 : 240
+            easing.type: btnNext.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color {
+          ColorAnimation { duration: 180 }
+        }
 
-            Behavior on color {
-              ColorAnimation { duration: 180 }
-            }
+        Text {
+          anchors.centerIn: parent
+          text: "󰒭" // Material Skip Next
+          font.family: root.iconFont
+          font.pixelSize: 18
+          color: root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
 
-            Text {
-              anchors.centerIn: parent
-              text: statusSubpanel.btData.enabled ? (statusSubpanel.btData.connectedCount > 0 ? "󰂱" : "󰂯") : "󰂲"
-              font.family: root.iconFont
-              font.pixelSize: 15
-              color: btCircle.isActiveTab ? root.islandColor : root.islandTextColor
-              renderType: Text.NativeRendering
-            }
-
-            HoverHandler {
-              id: btHover
-              onHoveredChanged: {
-                if (hovered) {
-                  statusSubpanel.activeTab = "bluetooth"
-                  statusSubpanel.isOpen = true
-                }
-              }
-            }
-
-            TapHandler {
-              id: btTap
-              onTapped: {
-                statusSubpanel.activeTab = "bluetooth"
-                statusSubpanel.isPinned = !statusSubpanel.isPinned
-                if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
-              }
+        MouseArea {
+          id: nextArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            if (root.activePlayer && root.activePlayer.canGoNext) {
+              root.activePlayer.next()
             }
           }
+        }
+      }
+    }
 
-          // 3. DNS Circular Button
-          Rectangle {
-            id: dnsCircle
-            width: 30
-            height: 30
-            radius: 15
-            anchors.verticalCenter: parent.verticalCenter
-            readonly property bool isActiveTab: statusSubpanel.isOpen && statusSubpanel.activeTab === "dns"
-            color: isActiveTab
-              ? root.frameConfig.activeBorderColor
-              : (dnsHover.hovered ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.10))
+    // =========================================================================
+    // Content Layer 3B: Opened While Idle (Big Circular Buttons for WiFi, BT, DNS)
+    // Hovering over each button drops down its corresponding subpanel!
+    // =========================================================================
+    Row {
+      id: statusControlsRow
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.borderThickness * 0.5
+      spacing: 20
+      opacity: (islandContainer.hoverProgress > 0.15 && !dynamicView.showVisualizer)
+        ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
+        : 0.0
+      scale: 0.88 + (0.12 * islandContainer.hoverProgress)
+      visible: opacity > 0.01 && !dynamicView.showVisualizer
+      transformOrigin: Item.Center
 
-            property bool isPressed: dnsTap.pressed
-            scale: isPressed ? 0.90 : (dnsHover.hovered ? 1.08 : 1.0)
+      // 1. Wi-Fi Big Circular Button
+      Rectangle {
+        id: btnWifi
+        width: 48
+        height: 48
+        radius: 24
+        anchors.verticalCenter: parent.verticalCenter
 
-            Behavior on scale {
-              NumberAnimation {
-                duration: dnsCircle.isPressed ? 120 : 240
-                easing.type: dnsCircle.isPressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
-            }
+        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "wifi")
+        readonly property bool isPressed: wifiArea.pressed
 
-            Behavior on color {
-              ColorAnimation { duration: 180 }
-            }
+        color: isSelectedTab
+          ? root.frameConfig.powerButtonActiveBg
+          : (wifiArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
 
-            Text {
-              anchors.centerIn: parent
-              text: "󰒃"
-              font.family: root.iconFont
-              font.pixelSize: 15
-              color: dnsCircle.isActiveTab ? root.islandColor : root.islandTextColor
-              renderType: Text.NativeRendering
-            }
+        scale: isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
 
-            HoverHandler {
-              id: dnsHover
-              onHoveredChanged: {
-                if (hovered) {
-                  statusSubpanel.activeTab = "dns"
-                  statusSubpanel.isOpen = true
-                }
-              }
-            }
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnWifi.isPressed ? 120 : 240
+            easing.type: btnWifi.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color {
+          ColorAnimation { duration: 180 }
+        }
 
-            TapHandler {
-              id: dnsTap
-              onTapped: {
-                statusSubpanel.activeTab = "dns"
-                statusSubpanel.isPinned = !statusSubpanel.isPinned
-                if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
-              }
-            }
+        Text {
+          anchors.centerIn: parent
+          text: {
+            if (!statusSubpanel || !statusSubpanel.wifiData || !statusSubpanel.wifiData.enabled) return "󰤮"
+            if (!statusSubpanel.wifiData.connected) return "󰤯"
+            var sig = statusSubpanel.wifiData.signal || 50
+            if (sig > 75) return "󰤨"
+            if (sig > 50) return "󰤥"
+            if (sig > 25) return "󰤢"
+            return "󰤟"
+          }
+          font.family: root.iconFont
+          font.pixelSize: 22
+          color: btnWifi.isSelectedTab
+            ? root.frameConfig.powerButtonActiveIcon
+            : root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: wifiArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onEntered: {
+            statusSubpanel.activeTab = "wifi"
+            statusSubpanel.isOpen = true
+          }
+          onClicked: {
+            statusSubpanel.activeTab = "wifi"
+            statusSubpanel.isPinned = !statusSubpanel.isPinned
+            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
+          }
+        }
+      }
+
+      // 2. Bluetooth Big Circular Button
+      Rectangle {
+        id: btnBluetooth
+        width: 48
+        height: 48
+        radius: 24
+        anchors.verticalCenter: parent.verticalCenter
+
+        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "bluetooth")
+        readonly property bool isPressed: btArea.pressed
+
+        color: isSelectedTab
+          ? root.frameConfig.powerButtonActiveBg
+          : (btArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
+
+        scale: isPressed ? 0.90 : (btArea.containsMouse ? 1.08 : 1.0)
+
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnBluetooth.isPressed ? 120 : 240
+            easing.type: btnBluetooth.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color {
+          ColorAnimation { duration: 180 }
+        }
+
+        Text {
+          anchors.centerIn: parent
+          text: {
+            if (!statusSubpanel || !statusSubpanel.btData || !statusSubpanel.btData.enabled) return "󰂲"
+            if (statusSubpanel.btData.connectedCount > 0) return "󰂱"
+            return "󰂯"
+          }
+          font.family: root.iconFont
+          font.pixelSize: 22
+          color: btnBluetooth.isSelectedTab
+            ? root.frameConfig.powerButtonActiveIcon
+            : root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: btArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onEntered: {
+            statusSubpanel.activeTab = "bluetooth"
+            statusSubpanel.isOpen = true
+          }
+          onClicked: {
+            statusSubpanel.activeTab = "bluetooth"
+            statusSubpanel.isPinned = !statusSubpanel.isPinned
+            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
+          }
+        }
+      }
+
+      // 3. DNS Big Circular Button
+      Rectangle {
+        id: btnDns
+        width: 48
+        height: 48
+        radius: 24
+        anchors.verticalCenter: parent.verticalCenter
+
+        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "dns")
+        readonly property bool isPressed: dnsArea.pressed
+
+        color: isSelectedTab
+          ? root.frameConfig.powerButtonActiveBg
+          : (dnsArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
+
+        scale: isPressed ? 0.90 : (dnsArea.containsMouse ? 1.08 : 1.0)
+
+        Behavior on scale {
+          NumberAnimation {
+            duration: btnDns.isPressed ? 120 : 240
+            easing.type: btnDns.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color {
+          ColorAnimation { duration: 180 }
+        }
+
+        Text {
+          anchors.centerIn: parent
+          text: "󰒃"
+          font.family: root.iconFont
+          font.pixelSize: 22
+          color: btnDns.isSelectedTab
+            ? root.frameConfig.powerButtonActiveIcon
+            : root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: dnsArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onEntered: {
+            statusSubpanel.activeTab = "dns"
+            statusSubpanel.isOpen = true
+          }
+          onClicked: {
+            statusSubpanel.activeTab = "dns"
+            statusSubpanel.isPinned = !statusSubpanel.isPinned
+            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
           }
         }
       }
     }
   }
 
+  // -------------------------------------------------------------
   // Invisible Hover Bridge between Top Notch and Subpanel
+  // -------------------------------------------------------------
   Item {
     id: hoverBridge
     anchors.top: islandContainer.bottom
     anchors.bottom: statusSubpanel.top
     anchors.horizontalCenter: islandContainer.horizontalCenter
     width: statusSubpanel.width
+    visible: statusSubpanel.isOpen || statusSubpanel.openProgress > 0.01
 
     HoverHandler {
       id: bridgeHover
     }
   }
 
+  // -------------------------------------------------------------
   // Dropdown Subpanel below Top Notch (Fluid iOS Spring Motion)
+  // Flush unibody attachment: sticks directly to the notch!
+  // -------------------------------------------------------------
   TopNotchSubpanel {
     id: statusSubpanel
+    frameConfig: root.frameConfig
     anchors.top: islandContainer.bottom
-    anchors.topMargin: 8
+    anchors.topMargin: root.frameConfig.statusSubpanelTopMargin
     anchors.horizontalCenter: islandContainer.horizontalCenter
     fontFamily: root.fontFamily
   }
 
+  // -------------------------------------------------------------
   // Outside Click Dismiss Handler when Subpanel is Pinned
+  // -------------------------------------------------------------
   MouseArea {
     id: dismissArea
     anchors.fill: parent
@@ -530,19 +773,21 @@ Item {
     }
   }
 
-  // Graceful Hover Close Timer
+  // -------------------------------------------------------------
+  // Graceful Hover Close Timer for Subpanel
+  // -------------------------------------------------------------
   Timer {
     id: subpanelCloseTimer
-    interval: 220
+    interval: 240
     repeat: false
     onTriggered: {
-      if (!statusSubpanel.isPinned && !hoverHandler.hovered && !bridgeHover.hovered && !statusSubpanel.isHovered) {
+      if (!statusSubpanel.isPinned && !islandHover.hovered && !bridgeHover.hovered && !statusSubpanel.isHovered) {
         statusSubpanel.isOpen = false
       }
     }
   }
 
-  readonly property bool isSubpanelAreaHovered: hoverHandler.hovered || bridgeHover.hovered || statusSubpanel.isHovered
+  readonly property bool isSubpanelAreaHovered: islandHover.hovered || bridgeHover.hovered || statusSubpanel.isHovered
 
   onIsSubpanelAreaHoveredChanged: {
     if (isSubpanelAreaHovered) {

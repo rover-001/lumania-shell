@@ -10,6 +10,7 @@ Item {
   required property var frameConfig
   property int borderThickness: frameConfig.borderThickness
   property color notchColor: frameConfig.activeBorderColor
+  property bool fullscreen: false
   property bool barHidden: false
 
   // Right Center Hover Control Notch (iOS-fluid notch blooming from right border)
@@ -23,7 +24,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuardPanel.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuardPanel.remapping
 
         ScreenMoveRemap {
           id: remapGuardPanel

@@ -9,19 +9,18 @@ import qs.Commons as Commons
 Item {
   id: root
 
-  FrameConfig {
-    id: frameConfig
-  }
+  // Injected FrameConfig from parent (DynamicIsland)
+  required property var frameConfig
 
-  // Configuration and Theme
+  // Configuration and Theme derived directly from wallpaper extraction
   property int borderThickness: frameConfig.borderThickness
   property color notchColor: frameConfig.activeBorderColor
-  property color activeTextColor: frameConfig.activeTextColor
-  property color mutedColor: frameConfig.mutedColor
+  property color activeTextColor: "#ffffff"
+  property color mutedColor: Qt.rgba(255, 255, 255, 0.75)
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   readonly property string iconFont: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
 
-  // Active Tab: "wifi", "bluetooth", or "dns"
+  // Active Panel: "wifi", "bluetooth", or "dns"
   property string activeTab: "wifi"
 
   // Visibility and Pinning State
@@ -49,7 +48,7 @@ Item {
   // Mask item exposed to PanelWindow
   property alias maskItem: subpanelCard
 
-  // Dimensions
+  // Dimensions (Minimal & Compact)
   implicitWidth: frameConfig.statusSubpanelWidth
   implicitHeight: frameConfig.statusSubpanelHeight
 
@@ -58,9 +57,6 @@ Item {
   scale: 0.94 + (0.06 * openProgress)
   transformOrigin: Item.Top
   visible: openProgress > 0.01
-
-  // Sinusoidal liquid volume pulse during mid-transition
-  readonly property real liquidOffset: Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * 4.0
 
   // -------------------------------------------------------------------------
   // System State & Backend Communications (Native Rust Binary)
@@ -103,6 +99,7 @@ Item {
             if (data.wifi) root.wifiData = data.wifi
             if (data.bluetooth) root.btData = data.bluetooth
             if (data.dns) root.dnsData = data.dns
+            root.isRescanningWifi = false
           } catch (e) {
             console.warn("TopNotchSubpanel parse error:", e)
           }
@@ -111,12 +108,27 @@ Item {
     }
   }
 
-  // Asynchronous action runner
+  function refresh() {
+    if (!statusProc.running) statusProc.running = true
+  }
+
+  Timer {
+    interval: 3000
+    running: true
+    repeat: true
+    onTriggered: {
+      if (root.isOpen) root.refresh()
+    }
+  }
+
+  onIsOpenChanged: {
+    if (root.isOpen) root.refresh()
+  }
+
   Process {
     id: actionProc
     onExited: {
-      root.isRescanningWifi = false
-      statusProc.running = true
+      root.refresh()
     }
   }
 
@@ -129,17 +141,13 @@ Item {
     runAction(["--toggle-wifi", root.wifiData.enabled ? "off" : "on"])
   }
 
-  function connectWifi(ssid) {
-    runAction(["--connect-wifi", ssid])
-  }
-
-  function disconnectWifi() {
-    runAction(["--disconnect-wifi"])
-  }
-
   function rescanWifi() {
     root.isRescanningWifi = true
     runAction(["--rescan-wifi"])
+  }
+
+  function connectWifi(ssid) {
+    runAction(["--connect-wifi", ssid])
   }
 
   function toggleBluetooth() {
@@ -158,249 +166,141 @@ Item {
     runAction(["--set-dns", preset])
   }
 
-  function refresh() {
-    if (!statusProc.running) statusProc.running = true
-  }
-
   Component.onCompleted: {
-    refresh()
-  }
-
-  // Dynamic poll timer: fast when open, relaxed when closed
-  Timer {
-    interval: root.isOpen ? 2500 : 8000
-    running: true
-    repeat: true
-    onTriggered: root.refresh()
-  }
-
-  onIsOpenChanged: {
-    if (root.isOpen) root.refresh()
+    root.refresh()
   }
 
   // -------------------------------------------------------------------------
-  // Main Subpanel Card Container
+  // Main Subpanel Container (Unibody Shape with Concave Top Flares, NO BORDER)
   // -------------------------------------------------------------------------
-  Rectangle {
+  Item {
     id: subpanelCard
     anchors.fill: parent
-    radius: frameConfig.statusSubpanelRadius
-    color: frameConfig.statusSubpanelBg
-    border.width: 1
-    border.color: frameConfig.statusSubpanelBorder
-    clip: true
 
-    // Hover handler for maintaining subpanel open state
     HoverHandler {
       id: cardHover
     }
 
-    // Top Segmented Control (Tabs: Wi-Fi, Bluetooth, DNS)
-    Rectangle {
-      id: tabSegmentedBar
-      anchors.top: parent.top
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.margins: 12
-      height: 38
-      radius: 19
-      color: Qt.rgba(255, 255, 255, 0.06)
-      border.width: 1
-      border.color: Qt.rgba(255, 255, 255, 0.08)
+    // Unibody Shape: Flares smoothly towards left-top and right-top to merge with top notch!
+    Shape {
+      id: cardShape
+      anchors.fill: parent
+      preferredRendererType: Shape.CurveRenderer
 
-      // Spring-driven sliding active indicator pill
-      Rectangle {
-        id: tabIndicator
-        readonly property real tabWidth: (tabSegmentedBar.width - 8) / 3
-        width: tabWidth
-        height: tabSegmentedBar.height - 8
-        radius: 15
-        y: 4
-        x: {
-          if (root.activeTab === "wifi") return 4
-          if (root.activeTab === "bluetooth") return 4 + tabWidth
-          return 4 + (tabWidth * 2)
-        }
-        color: frameConfig.activeBorderColor
+      readonly property real w: subpanelCard.width
+      readonly property real h: subpanelCard.height
+      readonly property real flareR: root.frameConfig.statusSubpanelFlareRadius
+      readonly property real rBot: root.frameConfig.statusSubpanelBottomRadius
 
-        Behavior on x {
-          NumberAnimation {
-            duration: 280
-            easing.type: Easing.OutBack
-            easing.overshoot: 1.08
-          }
-        }
-      }
+      ShapePath {
+        strokeWidth: 0
+        strokeColor: "transparent"
+        fillColor: root.frameConfig.activeBorderColor
+        capStyle: ShapePath.RoundCap
+        joinStyle: ShapePath.RoundJoin
 
-      Row {
-        anchors.fill: parent
-        anchors.margins: 4
+        // Start at left contact point with top notch (x=0, y=0)
+        startX: 0
+        startY: 0
 
-        // Wi-Fi Tab Button
-        Item {
-          width: parent.width / 3
-          height: parent.height
-
-          Rectangle {
-            anchors.fill: parent
-            radius: 15
-            color: "transparent"
-
-            Row {
-              anchors.centerIn: parent
-              spacing: 6
-
-              Text {
-                text: "󰤨"
-                font.family: root.iconFont
-                font.pixelSize: 13
-                color: root.activeTab === "wifi" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
-
-              Text {
-                text: "Wi-Fi"
-                font.family: root.fontFamily
-                font.pixelSize: 12
-                font.weight: root.activeTab === "wifi" ? Font.DemiBold : Font.Normal
-                color: root.activeTab === "wifi" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
-            }
-
-            TapHandler {
-              onTapped: {
-                root.activeTab = "wifi"
-                root.isPinned = true
-              }
-            }
-          }
+        // Top horizontal line spanning the contact with the notch
+        PathLine {
+          x: cardShape.w
+          y: 0
         }
 
-        // Bluetooth Tab Button
-        Item {
-          width: parent.width / 3
-          height: parent.height
-
-          Rectangle {
-            anchors.fill: parent
-            radius: 15
-            color: "transparent"
-
-            Row {
-              anchors.centerIn: parent
-              spacing: 6
-
-              Text {
-                text: "󰂯"
-                font.family: root.iconFont
-                font.pixelSize: 13
-                color: root.activeTab === "bluetooth" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
-
-              Text {
-                text: "Bluetooth"
-                font.family: root.fontFamily
-                font.pixelSize: 12
-                font.weight: root.activeTab === "bluetooth" ? Font.DemiBold : Font.Normal
-                color: root.activeTab === "bluetooth" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
-            }
-
-            TapHandler {
-              onTapped: {
-                root.activeTab = "bluetooth"
-                root.isPinned = true
-              }
-            }
-          }
+        // Top-right flare: curves concavely from (w, 0) towards right-top / into right vertical side at (w - flareR, flareR)
+        // Wait: contact is at (w, 0), curving inward to vertical line at (w - flareR)
+        PathCubic {
+          x: cardShape.w - cardShape.flareR
+          y: cardShape.flareR
+          control1X: cardShape.w - (cardShape.flareR * 0.5)
+          control1Y: 0
+          control2X: cardShape.w - cardShape.flareR
+          control2Y: cardShape.flareR * 0.5
         }
 
-        // DNS Tab Button
-        Item {
-          width: parent.width / 3
-          height: parent.height
+        // Right vertical side down to bottom-right corner
+        PathLine {
+          x: cardShape.w - cardShape.flareR
+          y: cardShape.h - cardShape.rBot
+        }
 
-          Rectangle {
-            anchors.fill: parent
-            radius: 15
-            color: "transparent"
+        // Bottom-right rounded corner arc
+        PathArc {
+          x: cardShape.w - cardShape.flareR - cardShape.rBot
+          y: cardShape.h
+          radiusX: cardShape.rBot
+          radiusY: cardShape.rBot
+          direction: PathArc.Clockwise
+        }
 
-            Row {
-              anchors.centerIn: parent
-              spacing: 6
+        // Bottom horizontal edge
+        PathLine {
+          x: cardShape.flareR + cardShape.rBot
+          y: cardShape.h
+        }
 
-              Text {
-                text: "󰒃"
-                font.family: root.iconFont
-                font.pixelSize: 13
-                color: root.activeTab === "dns" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
+        // Bottom-left rounded corner arc
+        PathArc {
+          x: cardShape.flareR
+          y: cardShape.h - cardShape.rBot
+          radiusX: cardShape.rBot
+          radiusY: cardShape.rBot
+          direction: PathArc.Clockwise
+        }
 
-              Text {
-                text: "DNS"
-                font.family: root.fontFamily
-                font.pixelSize: 12
-                font.weight: root.activeTab === "dns" ? Font.DemiBold : Font.Normal
-                color: root.activeTab === "dns" ? root.activeTextColor : root.mutedColor
-                verticalAlignment: Text.AlignVCenter
-              }
-            }
+        // Left vertical side up to left flare
+        PathLine {
+          x: cardShape.flareR
+          y: cardShape.flareR
+        }
 
-            TapHandler {
-              onTapped: {
-                root.activeTab = "dns"
-                root.isPinned = true
-              }
-            }
-          }
+        // Top-left flare: curves concavely from (flareR, flareR) out and up towards left-top to (0, 0)
+        PathCubic {
+          x: 0
+          y: 0
+          control1X: cardShape.flareR
+          control1Y: cardShape.flareR * 0.5
+          control2X: cardShape.flareR * 0.5
+          control2Y: 0
         }
       }
     }
 
-    // -----------------------------------------------------------------------
-    // TAB 1: WI-FI VIEW
-    // -----------------------------------------------------------------------
-    Item {
+    // =========================================================================
+    // PANEL 1: MINIMAL WI-FI VIEW (Compact, Zero Clutter)
+    // =========================================================================
+    ColumnLayout {
       id: wifiView
-      anchors.top: tabSegmentedBar.bottom
-      anchors.topMargin: 10
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      anchors.margins: 14
+      anchors.fill: parent
+      anchors.leftMargin: cardShape.flareR + 6
+      anchors.rightMargin: cardShape.flareR + 6
+      anchors.bottomMargin: 14
+      anchors.topMargin: 12
+      spacing: 8
       visible: root.activeTab === "wifi"
 
-      // Active Connection Card
+      // Top Status Card
       Rectangle {
-        id: wifiActiveCard
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 62
-        radius: 14
-        color: Qt.rgba(255, 255, 255, 0.05)
+        Layout.fillWidth: true
+        height: 64
+        radius: 12
+        color: Qt.rgba(0, 0, 0, 0.22)
         border.width: 1
-        border.color: root.wifiData.connected
-          ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.45)
-          : Qt.rgba(255, 255, 255, 0.08)
+        border.color: Qt.rgba(255, 255, 255, 0.10)
 
         RowLayout {
           anchors.fill: parent
-          anchors.margins: 12
+          anchors.margins: 10
           spacing: 10
 
-          // Wifi Signal Icon
+          // Signal Icon Circle
           Rectangle {
             width: 36
             height: 36
             radius: 18
-            color: root.wifiData.connected
-              ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.22)
-              : Qt.rgba(255, 255, 255, 0.08)
+            color: root.wifiData.connected ? "#ffffff" : Qt.rgba(0, 0, 0, 0.25)
 
             Text {
               anchors.centerIn: parent
@@ -414,8 +314,8 @@ Item {
                 return "󰤟"
               }
               font.family: root.iconFont
-              font.pixelSize: 17
-              color: root.wifiData.connected ? frameConfig.activeBorderColor : root.mutedColor
+              font.pixelSize: 18
+              color: root.wifiData.connected ? root.frameConfig.activeBorderColor : "#ffffff"
             }
           }
 
@@ -426,12 +326,12 @@ Item {
 
             Text {
               text: root.wifiData.enabled
-                ? (root.wifiData.connected ? (root.wifiData.ssid || "Connected") : "Not Connected")
-                : "Wi-Fi Disabled"
+                ? (root.wifiData.connected ? (root.wifiData.ssid || "Connected") : (root.wifiData.networks.length > 0 ? "Networks Available" : "Searching for Wi-Fi..."))
+                : "Wi-Fi Off"
               font.family: root.fontFamily
               font.pixelSize: 13
               font.weight: Font.DemiBold
-              color: root.activeTextColor
+              color: "#ffffff"
               elide: Text.ElideRight
               Layout.fillWidth: true
             }
@@ -440,45 +340,13 @@ Item {
               text: root.wifiData.enabled
                 ? (root.wifiData.connected
                     ? ((root.wifiData.ip ? root.wifiData.ip + " • " : "") + root.wifiData.signal + "% signal")
-                    : "Connect to a network below")
-                : "Turn on to see networks"
+                    : (root.wifiData.networks.length + " network(s) in range"))
+                : "Turn on to connect"
               font.family: root.fontFamily
               font.pixelSize: 11
-              color: root.mutedColor
+              color: Qt.rgba(255, 255, 255, 0.75)
               elide: Text.ElideRight
               Layout.fillWidth: true
-            }
-          }
-
-          // Rescan Button
-          Rectangle {
-            width: 32
-            height: 32
-            radius: 16
-            color: rescanTap.pressed ? Qt.rgba(255, 255, 255, 0.15) : Qt.rgba(255, 255, 255, 0.06)
-            visible: root.wifiData.enabled
-
-            Text {
-              id: rescanIcon
-              anchors.centerIn: parent
-              text: "󰑐"
-              font.family: root.iconFont
-              font.pixelSize: 14
-              color: root.activeTextColor
-              rotation: root.isRescanningWifi ? 360 : 0
-
-              Behavior on rotation {
-                NumberAnimation {
-                  duration: 600
-                  loops: root.isRescanningWifi ? Animation.Infinite : 1
-                  easing.type: Easing.Linear
-                }
-              }
-            }
-
-            TapHandler {
-              id: rescanTap
-              onTapped: root.rescanWifi()
             }
           }
 
@@ -488,7 +356,7 @@ Item {
             width: 44
             height: 24
             radius: 12
-            color: root.wifiData.enabled ? frameConfig.activeBorderColor : Qt.rgba(255, 255, 255, 0.18)
+            color: root.wifiData.enabled ? "#ffffff" : Qt.rgba(0, 0, 0, 0.25)
 
             Behavior on color { ColorAnimation { duration: 200 } }
 
@@ -499,7 +367,7 @@ Item {
               radius: 9
               y: 3
               x: root.wifiData.enabled ? 23 : 3
-              color: "#ffffff"
+              color: root.wifiData.enabled ? root.frameConfig.activeBorderColor : "#ffffff"
 
               Behavior on x {
                 NumberAnimation {
@@ -517,111 +385,88 @@ Item {
         }
       }
 
-      // Available Networks Section Title
-      Text {
-        id: networksHeader
-        anchors.top: wifiActiveCard.bottom
-        anchors.topMargin: 12
-        anchors.left: parent.left
-        text: "AVAILABLE NETWORKS"
-        font.family: root.fontFamily
-        font.pixelSize: 10
-        font.weight: Font.Bold
-        color: root.mutedColor
-        opacity: 0.75
-      }
-
-      // Networks Scrollable List
-      ListView {
-        id: wifiListView
-        anchors.top: networksHeader.bottom
-        anchors.topMargin: 6
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+      // Available Networks List (Scrollable / Flickable)
+      Rectangle {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        radius: 10
+        color: Qt.rgba(0, 0, 0, 0.16)
         clip: true
-        spacing: 4
-        model: root.wifiData.networks || []
+        visible: root.wifiData.enabled
 
-        delegate: Item {
-          width: wifiListView.width
-          height: 38
+        ListView {
+          id: wifiList
+          anchors.fill: parent
+          anchors.margins: 4
+          spacing: 2
+          boundsBehavior: Flickable.StopAtBounds
 
-          Rectangle {
-            id: netItemBg
-            anchors.fill: parent
-            radius: 10
-            color: netItemHover.hovered
-              ? Qt.rgba(255, 255, 255, 0.08)
-              : (modelData.active ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.12) : "transparent")
-
-            HoverHandler {
-              id: netItemHover
+          model: {
+            var nets = root.wifiData.networks || []
+            // Filter out current active SSID if already connected to show other available networks
+            var filtered = []
+            for (var i = 0; i < nets.length; i++) {
+              var n = nets[i]
+              if (n.ssid && n.ssid.length > 0 && n.ssid !== "--") {
+                filtered.push(n)
+              }
             }
+            return filtered
+          }
+
+          delegate: Rectangle {
+            id: netItem
+            width: wifiList.width
+            height: 28
+            radius: 6
+            color: netItemHover.hovered ? Qt.rgba(255, 255, 255, 0.15) : "transparent"
+
+            HoverHandler { id: netItemHover }
 
             RowLayout {
               anchors.fill: parent
-              anchors.leftMargin: 10
-              anchors.rightMargin: 10
-              spacing: 10
+              anchors.leftMargin: 8
+              anchors.rightMargin: 8
+              spacing: 6
 
-              // Signal icon
               Text {
                 text: {
-                  var s = modelData.signal || 50
-                  if (s > 75) return "󰤨"
-                  if (s > 50) return "󰤥"
-                  if (s > 25) return "󰤢"
+                  var sig = modelData.signal || 50
+                  if (sig > 75) return "󰤨"
+                  if (sig > 50) return "󰤥"
+                  if (sig > 25) return "󰤢"
                   return "󰤟"
                 }
                 font.family: root.iconFont
-                font.pixelSize: 14
-                color: modelData.active ? frameConfig.activeBorderColor : root.mutedColor
+                font.pixelSize: 13
+                color: modelData.active ? "#ffffff" : Qt.rgba(255, 255, 255, 0.70)
               }
 
-              // SSID
               Text {
-                text: modelData.ssid || ""
+                text: modelData.ssid
                 font.family: root.fontFamily
-                font.pixelSize: 12
+                font.pixelSize: 11
                 font.weight: modelData.active ? Font.DemiBold : Font.Normal
-                color: modelData.active ? root.activeTextColor : Qt.rgba(root.activeTextColor.r, root.activeTextColor.g, root.activeTextColor.b, 0.90)
+                color: "#ffffff"
                 elide: Text.ElideRight
                 Layout.fillWidth: true
               }
 
-              // Lock icon if secured
               Text {
-                text: ""
-                font.family: root.iconFont
-                font.pixelSize: 11
-                color: root.mutedColor
-                visible: Boolean(modelData.security && modelData.security !== "--")
+                visible: Boolean(modelData.active)
+                text: "Active"
+                font.family: root.fontFamily
+                font.pixelSize: 9
+                font.weight: Font.Bold
+                color: "#ffffff"
               }
 
-              // Connected / Connect Action
-              Item {
-                width: modelData.active ? 68 : 62
-                height: 24
-
-                Rectangle {
-                  anchors.fill: parent
-                  radius: 12
-                  color: modelData.active
-                    ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.25)
-                    : (netItemHover.hovered ? frameConfig.activeBorderColor : Qt.rgba(255, 255, 255, 0.08))
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: modelData.active ? "Connected" : "Connect"
-                    font.family: root.fontFamily
-                    font.pixelSize: 10
-                    font.weight: Font.Medium
-                    color: modelData.active
-                      ? frameConfig.activeBorderColor
-                      : (netItemHover.hovered ? root.activeTextColor : root.mutedColor)
-                  }
-                }
+              Text {
+                visible: !modelData.active && modelData.security && modelData.security.length > 0
+                text: "󰌾"
+                font.family: root.iconFont
+                font.pixelSize: 10
+                color: Qt.rgba(255, 255, 255, 0.60)
               }
             }
 
@@ -633,56 +478,69 @@ Item {
               }
             }
           }
+
+          // Empty state placeholder
+          Text {
+            anchors.centerIn: parent
+            visible: wifiList.count === 0
+            text: root.isRescanningWifi ? "Scanning for networks..." : "No other networks found"
+            font.family: root.fontFamily
+            font.pixelSize: 11
+            color: Qt.rgba(255, 255, 255, 0.60)
+          }
         }
       }
     }
 
-    // -----------------------------------------------------------------------
-    // TAB 2: BLUETOOTH VIEW
-    // -----------------------------------------------------------------------
-    Item {
+    // =========================================================================
+    // PANEL 2: MINIMAL BLUETOOTH VIEW (Bug-Free Device Detection)
+    // =========================================================================
+    ColumnLayout {
       id: btView
-      anchors.top: tabSegmentedBar.bottom
-      anchors.topMargin: 10
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      anchors.margins: 14
+      anchors.fill: parent
+      anchors.leftMargin: cardShape.flareR + 6
+      anchors.rightMargin: cardShape.flareR + 6
+      anchors.bottomMargin: 14
+      anchors.topMargin: 12
+      spacing: 8
       visible: root.activeTab === "bluetooth"
 
-      // Bluetooth Status Card
+      readonly property var connectedDev: {
+        var devs = root.btData.devices || []
+        for (var i = 0; i < devs.length; i++) {
+          if (devs[i].connected) return devs[i]
+        }
+        return null
+      }
+
+      readonly property var primaryDev: connectedDev || ((root.btData.devices && root.btData.devices.length > 0) ? root.btData.devices[0] : null)
+
+      // Top Status Card
       Rectangle {
-        id: btActiveCard
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 62
-        radius: 14
-        color: Qt.rgba(255, 255, 255, 0.05)
+        Layout.fillWidth: true
+        height: 64
+        radius: 12
+        color: Qt.rgba(0, 0, 0, 0.22)
         border.width: 1
-        border.color: root.btData.enabled
-          ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.45)
-          : Qt.rgba(255, 255, 255, 0.08)
+        border.color: Qt.rgba(255, 255, 255, 0.10)
 
         RowLayout {
           anchors.fill: parent
-          anchors.margins: 12
+          anchors.margins: 10
           spacing: 10
 
           Rectangle {
             width: 36
             height: 36
             radius: 18
-            color: root.btData.enabled
-              ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.22)
-              : Qt.rgba(255, 255, 255, 0.08)
+            color: (root.btData.enabled && Boolean(btView.connectedDev)) ? "#ffffff" : Qt.rgba(0, 0, 0, 0.25)
 
             Text {
               anchors.centerIn: parent
-              text: root.btData.enabled ? "󰂯" : "󰂲"
+              text: root.btData.enabled ? (btView.connectedDev ? "󰂱" : "󰂯") : "󰂲"
               font.family: root.iconFont
               font.pixelSize: 18
-              color: root.btData.enabled ? frameConfig.activeBorderColor : root.mutedColor
+              color: (root.btData.enabled && Boolean(btView.connectedDev)) ? root.frameConfig.activeBorderColor : "#ffffff"
             }
           }
 
@@ -691,20 +549,30 @@ Item {
             spacing: 2
 
             Text {
-              text: root.btData.enabled ? "Bluetooth Powered On" : "Bluetooth Disabled"
+              text: root.btData.enabled
+                ? (btView.connectedDev
+                    ? btView.connectedDev.name
+                    : (root.btData.devices.length > 0 ? "Bluetooth Ready" : "Searching for Devices..."))
+                : "Bluetooth Off"
               font.family: root.fontFamily
               font.pixelSize: 13
               font.weight: Font.DemiBold
-              color: root.activeTextColor
+              color: "#ffffff"
+              elide: Text.ElideRight
+              Layout.fillWidth: true
             }
 
             Text {
               text: root.btData.enabled
-                ? (root.btData.connectedCount > 0 ? (root.btData.connectedCount + " device(s) connected") : "Discoverable & ready")
-                : "Turn on to manage devices"
+                ? (btView.connectedDev
+                    ? "Connected • Audio Active"
+                    : (root.btData.devices.length > 0 ? (root.btData.devices.length + " paired device(s)") : "No devices in range"))
+                : "Turn on to manage audio"
               font.family: root.fontFamily
               font.pixelSize: 11
-              color: root.mutedColor
+              color: Qt.rgba(255, 255, 255, 0.75)
+              elide: Text.ElideRight
+              Layout.fillWidth: true
             }
           }
 
@@ -714,7 +582,7 @@ Item {
             width: 44
             height: 24
             radius: 12
-            color: root.btData.enabled ? frameConfig.activeBorderColor : Qt.rgba(255, 255, 255, 0.18)
+            color: root.btData.enabled ? "#ffffff" : Qt.rgba(0, 0, 0, 0.25)
 
             Behavior on color { ColorAnimation { duration: 200 } }
 
@@ -725,7 +593,7 @@ Item {
               radius: 9
               y: 3
               x: root.btData.enabled ? 23 : 3
-              color: "#ffffff"
+              color: root.btData.enabled ? root.frameConfig.activeBorderColor : "#ffffff"
 
               Behavior on x {
                 NumberAnimation {
@@ -743,160 +611,127 @@ Item {
         }
       }
 
-      // Devices Header
-      Text {
-        id: btDevicesHeader
-        anchors.top: btActiveCard.bottom
-        anchors.topMargin: 12
-        anchors.left: parent.left
-        text: "PAIRED & KNOWN DEVICES"
-        font.family: root.fontFamily
-        font.pixelSize: 10
-        font.weight: Font.Bold
-        color: root.mutedColor
-        opacity: 0.75
-      }
-
-      // Devices List
-      ListView {
-        id: btListView
-        anchors.top: btDevicesHeader.bottom
-        anchors.topMargin: 6
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
+      // Middle: Paired & Known Devices List
+      Rectangle {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        radius: 10
+        color: Qt.rgba(0, 0, 0, 0.16)
         clip: true
-        spacing: 4
-        model: root.btData.devices || []
+        visible: root.btData.enabled
 
-        delegate: Item {
-          width: btListView.width
-          height: 42
+        ListView {
+          id: btList
+          anchors.fill: parent
+          anchors.margins: 4
+          spacing: 2
+          boundsBehavior: Flickable.StopAtBounds
+          model: root.btData.devices || []
 
-          Rectangle {
-            id: btItemBg
-            anchors.fill: parent
-            radius: 10
-            color: btItemHover.hovered
-              ? Qt.rgba(255, 255, 255, 0.08)
-              : (modelData.connected ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.12) : "transparent")
+          delegate: Rectangle {
+            id: btItem
+            width: btList.width
+            height: 28
+            radius: 6
+            color: btItemHover.hovered ? Qt.rgba(255, 255, 255, 0.15) : "transparent"
 
-            HoverHandler {
-              id: btItemHover
-            }
+            HoverHandler { id: btItemHover }
 
             RowLayout {
               anchors.fill: parent
-              anchors.leftMargin: 10
-              anchors.rightMargin: 10
-              spacing: 10
+              anchors.leftMargin: 8
+              anchors.rightMargin: 8
+              spacing: 6
 
-              // Device icon based on type
               Text {
                 text: {
-                  if (modelData.icon === "headset") return "󰋋"
                   if (modelData.icon === "gamepad") return "󰊴"
-                  if (modelData.icon === "phone") return "󰏲"
+                  if (modelData.icon === "audio-card" || modelData.icon === "headset") return "󰋋"
                   return "󰂯"
                 }
                 font.family: root.iconFont
-                font.pixelSize: 16
-                color: modelData.connected ? frameConfig.activeBorderColor : root.mutedColor
+                font.pixelSize: 13
+                color: modelData.connected ? "#ffffff" : Qt.rgba(255, 255, 255, 0.70)
               }
 
-              // Device Name
               Text {
-                text: modelData.name || modelData.mac
+                text: modelData.name
                 font.family: root.fontFamily
-                font.pixelSize: 12
+                font.pixelSize: 11
                 font.weight: modelData.connected ? Font.DemiBold : Font.Normal
-                color: modelData.connected ? root.activeTextColor : Qt.rgba(root.activeTextColor.r, root.activeTextColor.g, root.activeTextColor.b, 0.90)
+                color: "#ffffff"
                 elide: Text.ElideRight
                 Layout.fillWidth: true
               }
 
-              // Connect / Disconnect Action Pill
-              Item {
-                width: 76
-                height: 24
-
-                Rectangle {
-                  anchors.fill: parent
-                  radius: 12
-                  color: modelData.connected
-                    ? (btItemHover.hovered ? Qt.rgba(255, 85, 85, 0.30) : Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.25))
-                    : (btItemHover.hovered ? frameConfig.activeBorderColor : Qt.rgba(255, 255, 255, 0.08))
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: modelData.connected ? (btItemHover.hovered ? "Disconnect" : "Connected") : "Connect"
-                    font.family: root.fontFamily
-                    font.pixelSize: 10
-                    font.weight: Font.Medium
-                    color: modelData.connected
-                      ? (btItemHover.hovered ? "#ff6666" : frameConfig.activeBorderColor)
-                      : (btItemHover.hovered ? root.activeTextColor : root.mutedColor)
-                  }
-                }
-
-                TapHandler {
-                  onTapped: {
-                    if (modelData.connected) {
-                      root.disconnectBt(modelData.mac)
-                    } else {
-                      root.connectBt(modelData.mac)
-                    }
-                  }
-                }
+              Text {
+                text: modelData.connected ? "Disconnect" : "Connect"
+                font.family: root.fontFamily
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+                color: modelData.connected ? "#ffffff" : Qt.rgba(255, 255, 255, 0.80)
               }
             }
+
+            TapHandler {
+              onTapped: {
+                if (modelData.connected) root.disconnectBt(modelData.mac)
+                else root.connectBt(modelData.mac)
+              }
+            }
+          }
+
+          Text {
+            anchors.centerIn: parent
+            visible: btList.count === 0
+            text: "No devices found"
+            font.family: root.fontFamily
+            font.pixelSize: 11
+            color: Qt.rgba(255, 255, 255, 0.60)
           }
         }
       }
     }
 
-    // -----------------------------------------------------------------------
-    // TAB 3: DNS RESOLVER VIEW
-    // -----------------------------------------------------------------------
-    Item {
+    // =========================================================================
+    // PANEL 3: MINIMAL DNS RESOLVER VIEW (Compact 4-Pill Selector)
+    // =========================================================================
+    ColumnLayout {
       id: dnsView
-      anchors.top: tabSegmentedBar.bottom
-      anchors.topMargin: 10
-      anchors.left: parent.left
-      anchors.right: parent.right
-      anchors.bottom: parent.bottom
-      anchors.margins: 14
+      anchors.fill: parent
+      anchors.leftMargin: cardShape.flareR + 6
+      anchors.rightMargin: cardShape.flareR + 6
+      anchors.bottomMargin: 14
+      anchors.topMargin: 12
+      spacing: 8
       visible: root.activeTab === "dns"
 
-      // Active DNS Card
+      // Top Status Card
       Rectangle {
-        id: dnsActiveCard
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 60
-        radius: 14
-        color: Qt.rgba(255, 255, 255, 0.05)
+        Layout.fillWidth: true
+        height: 64
+        radius: 12
+        color: Qt.rgba(0, 0, 0, 0.22)
         border.width: 1
-        border.color: Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.45)
+        border.color: Qt.rgba(255, 255, 255, 0.10)
 
         RowLayout {
           anchors.fill: parent
-          anchors.margins: 12
+          anchors.margins: 10
           spacing: 10
 
           Rectangle {
             width: 36
             height: 36
             radius: 18
-            color: Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.22)
+            color: "#ffffff"
 
             Text {
               anchors.centerIn: parent
               text: "󰒃"
               font.family: root.iconFont
               font.pixelSize: 18
-              color: frameConfig.activeBorderColor
+              color: root.frameConfig.activeBorderColor
             }
           }
 
@@ -905,136 +740,118 @@ Item {
             spacing: 2
 
             Text {
-              text: "Active DNS: " + (root.dnsData.current || "8.8.8.8")
+              text: "DNS: " + (root.dnsData.preset ? root.dnsData.preset.toUpperCase() : "Active")
               font.family: root.fontFamily
               font.pixelSize: 13
               font.weight: Font.DemiBold
-              color: root.activeTextColor
+              color: "#ffffff"
             }
 
             Text {
-              text: "Encrypted DNS-over-TLS (DoT) Enabled"
+              text: "Resolver: " + (root.dnsData.current || "8.8.8.8")
               font.family: root.fontFamily
               font.pixelSize: 11
-              color: root.mutedColor
+              color: Qt.rgba(255, 255, 255, 0.75)
             }
           }
 
-          // Secure badge
+          // Secure Badge
           Rectangle {
-            width: 58
+            width: 54
             height: 22
             radius: 11
-            color: Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.22)
+            color: "#ffffff"
 
             Text {
               anchors.centerIn: parent
-              text: "Secure"
+              text: "DoT"
               font.family: root.fontFamily
               font.pixelSize: 10
               font.weight: Font.Bold
-              color: frameConfig.activeBorderColor
+              color: root.frameConfig.activeBorderColor
             }
           }
         }
       }
 
-      // DNS Presets Header
-      Text {
-        id: dnsPresetsHeader
-        anchors.top: dnsActiveCard.bottom
-        anchors.topMargin: 12
-        anchors.left: parent.left
-        text: "FAST 1-CLICK DNS PRESETS"
-        font.family: root.fontFamily
-        font.pixelSize: 10
-        font.weight: Font.Bold
-        color: root.mutedColor
-        opacity: 0.75
-      }
+      // Middle: DNS Presets Card / Selector
+      Rectangle {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        radius: 10
+        color: Qt.rgba(0, 0, 0, 0.16)
+        clip: true
 
-      // 5 Presets List
-      Column {
-        anchors.top: dnsPresetsHeader.bottom
-        anchors.topMargin: 6
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        spacing: 5
+        ColumnLayout {
+          anchors.fill: parent
+          anchors.margins: 6
+          spacing: 4
 
-        // Preset helper component
-        Repeater {
-          model: [
-            { id: "cloudflare", name: "Cloudflare (1.1.1.1)", desc: "Ultra-fast, privacy-first, zero-logging", icon: "󰞀" },
-            { id: "google", name: "Google DNS (8.8.8.8)", desc: "Global high-availability resolver", icon: "󰊭" },
-            { id: "quad9", name: "Quad9 (9.9.9.9)", desc: "Automated malware & phishing protection", icon: "" },
-            { id: "adguard", name: "AdGuard DNS", desc: "Network-wide ad & tracker blocking", icon: "󰘚" },
-            { id: "dhcp", name: "System / DHCP Default", desc: "Automatic router-assigned DNS", icon: "󰌘" }
-          ]
+          Repeater {
+            model: [
+              { id: "cloudflare", label: "Cloudflare", desc: "1.1.1.1 • Fast & Private" },
+              { id: "google", label: "Google", desc: "8.8.8.8 • Global Anycast" },
+              { id: "adguard", label: "AdGuard", desc: "94.140.14.14 • Ad & Tracker Blocking" },
+              { id: "dhcp", label: "DHCP Default", desc: "System / Router Default" }
+            ]
 
-          delegate: Rectangle {
-            id: presetCard
-            width: parent.width
-            height: 40
-            radius: 10
-            readonly property bool isSelected: root.dnsData.preset === modelData.id
-            color: isSelected
-              ? Qt.rgba(frameConfig.activeBorderColor.r, frameConfig.activeBorderColor.g, frameConfig.activeBorderColor.b, 0.18)
-              : (presetHover.hovered ? Qt.rgba(255, 255, 255, 0.08) : Qt.rgba(255, 255, 255, 0.03))
-            border.width: isSelected ? 1 : 0
-            border.color: frameConfig.activeBorderColor
+            Rectangle {
+              id: presetItem
+              Layout.fillWidth: true
+              Layout.fillHeight: true
+              radius: 6
+              readonly property bool isSelected: root.dnsData.preset === modelData.id
+              color: isSelected
+                ? Qt.rgba(255, 255, 255, 0.22)
+                : (itemHover.hovered ? Qt.rgba(255, 255, 255, 0.12) : "transparent")
 
-            HoverHandler {
-              id: presetHover
-            }
+              HoverHandler { id: itemHover }
 
-            RowLayout {
-              anchors.fill: parent
-              anchors.leftMargin: 10
-              anchors.rightMargin: 10
-              spacing: 8
+              RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 8
+                anchors.rightMargin: 8
+                spacing: 8
 
-              Text {
-                text: modelData.icon
-                font.family: root.iconFont
-                font.pixelSize: 14
-                color: presetCard.isSelected ? frameConfig.activeBorderColor : root.mutedColor
-              }
+                Rectangle {
+                  width: 8
+                  height: 8
+                  radius: 4
+                  color: presetItem.isSelected ? "#ffffff" : Qt.rgba(255, 255, 255, 0.30)
+                }
 
-              ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 1
+                ColumnLayout {
+                  Layout.fillWidth: true
+                  spacing: 1
 
-                Text {
-                  text: modelData.name
-                  font.family: root.fontFamily
-                  font.pixelSize: 11
-                  font.weight: presetCard.isSelected ? Font.DemiBold : Font.Normal
-                  color: root.activeTextColor
+                  Text {
+                    text: modelData.label
+                    font.family: root.fontFamily
+                    font.pixelSize: 11
+                    font.weight: presetItem.isSelected ? Font.DemiBold : Font.Normal
+                    color: "#ffffff"
+                  }
+
+                  Text {
+                    text: modelData.desc
+                    font.family: root.fontFamily
+                    font.pixelSize: 9
+                    color: Qt.rgba(255, 255, 255, 0.65)
+                  }
                 }
 
                 Text {
-                  text: modelData.desc
+                  visible: presetItem.isSelected
+                  text: "Active"
                   font.family: root.fontFamily
                   font.pixelSize: 9
-                  color: root.mutedColor
+                  font.weight: Font.Bold
+                  color: "#ffffff"
                 }
               }
 
-              // Checkmark badge
-              Text {
-                text: "✓"
-                font.family: root.fontFamily
-                font.pixelSize: 13
-                font.weight: Font.Bold
-                color: frameConfig.activeBorderColor
-                visible: presetCard.isSelected
-              }
-            }
-
-            TapHandler {
-              onTapped: {
-                root.setDnsPreset(modelData.id)
+              TapHandler {
+                onTapped: root.setDnsPreset(modelData.id)
               }
             }
           }

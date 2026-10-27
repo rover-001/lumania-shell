@@ -69,11 +69,14 @@ QtObject {
   // =========================================================================
   // DYNAMIC ISLAND CONSTANTS (TOP NOTCH)
   // =========================================================================
-  property int islandBodyWidth: 76
+  property int islandBodyWidth: 206
   property int islandTopCurveRadius: 10             // Top fillet radius when closed
   property int islandExpandedTopCurveRadius: 14     // Top fillet radius when opened
   property int islandBottomCornerRadius: 15         // Bottom corner radius when closed
   property int islandExpandedBottomCornerRadius: 28 // Bottom corner radius when opened
+  property int islandHoverWidthDelta: 140           // Width expansion on hover
+  property int islandHoverHeightDeltaIdle: 46       // Height expansion when idle (fits 48px circular status buttons)
+  property int islandHoverHeightDeltaMedia: 24      // Height expansion when media playing (fits media controls)
 
   // =========================================================================
   // RIGHT CONTROL NOTCH CONSTANTS
@@ -91,30 +94,75 @@ QtObject {
   property real rightExpandedFlareRadius: 18      // Concave flare radius when opened
 
   // =========================================================================
-  // TOP NOTCH STATUS & FLUID SUBPANEL CONSTANTS
+  // TOP NOTCH STATUS & FLUID SUBPANEL CONSTANTS (MINIMAL UNIBODY)
   // =========================================================================
-  property real statusSubpanelWidth: 350
-  property real statusSubpanelHeight: 380
-  property real statusSubpanelRadius: 20
-  property color statusSubpanelBg: Qt.rgba(14 / 255, 14 / 255, 18 / 255, 0.96)
-  property color statusSubpanelBorder: Qt.rgba(activeBorderColor.r, activeBorderColor.g, activeBorderColor.b, 0.35)
+  property real statusSubpanelWidth: 320            // Total width of dropdown subpanel
+  property real statusSubpanelHeight: 220           // Total height of dropdown subpanel
+  property real statusSubpanelFlareRadius: 16       // Concave flare radius curving toward left-top & right-top
+  property real statusSubpanelBottomRadius: 20      // Bottom rounded corner radius of subpanel
+  property real statusSubpanelTopMargin: -4         // Vertical overlap with bottom of Dynamic Island
+  property color statusSubpanelBg: activeBorderColor
+  property color statusSubpanelBorder: Qt.rgba(0, 0, 0, 0.15)
 
   // =========================================================================
-  // BOTTOM SEARCH NOTCH CONSTANTS
+  // BOTTOM-LEFT SEARCH NOTCH — EDIT SHAPE HERE
   // =========================================================================
-  // Resting notch width: adjust here to make the bottom notch wider or narrower
-  property real searchCollapsedWidth: 280
+  // Resting state is a "C" gusset: a low lip running along the BOTTOM border
+  // plus a finger climbing the LEFT border, so the corner is one solid piece.
+  //
+  //     │              <- left border
+  //     │  finger height
+  //     ▌              <- finger width
+  //     └──╮
+  //        ╰──────────  <- lip height / lip length
 
-  // Expanded search panel width & height
+  // ---- WIDTH --------------------------------------------------------------
+  // Lip length: how far the resting gusset reaches right along the bottom
+  property real searchCollapsedWidth: 110
+  // Finger width: the part merged into the left border
+  property real searchLeftTabWidth: 10
+  // Panel width when the search is open
   property real searchExpandedWidth: 560
-  property real searchCollapsedHeight: 10           // Resting protrusion past bottom border (sleek low profile)
-  property real searchExpandedHeight: 460           // Expanded search window height
 
-  // Search notch corner & flare radii:
-  property real searchCornerRadius: 10             // Top corner radius when closed
-  property real searchExpandedCornerRadius: 26     // Top corner radius when opened
-  property real searchFlareRadius: 8               // Concave flare radius when closed
-  property real searchExpandedFlareRadius: 18      // Concave flare radius when opened
+  // ---- HEIGHT -------------------------------------------------------------
+  // Lip rise above the bottom border (keep small for a sleek hairline lip)
+  property real searchCollapsedHeight: 5
+  // Finger height: how far the gusset climbs up the left border
+  property real searchLeftTabHeight: 100
+  // Panel height when the search is open
+  property real searchExpandedHeight: 460
+
+  // ---- CURVES / RADII -----------------------------------------------------
+  // Rounded cap on the finger's free end (0 = square top)
+  property real searchTabCapRadius: 5
+  // Inner concave radius where the finger melts into the lip (the "C" mouth)
+  property real searchInnerRadius: 12
+  // Free (right) end of the resting lip
+  property real searchCornerRadius: 10
+  // Concave merger of the resting gusset into the left + bottom borders
+  property real searchFlareRadius: 12
+  // Same two radii once the panel is open
+  property real searchExpandedCornerRadius: 26
+  property real searchExpandedFlareRadius: 20
+  // Bezier tension of every concave flare (0.55 default, lower = tighter curve)
+  property real searchCurveTension: 0.55
+
+  // ---- SAFETY CLAMPS (advanced: keep the outline from ever self-crossing) --
+  property real searchTabWidthMaxRatio: 0.25       // finger width <= notch width * this
+  property real searchLipFlareMaxRatio: 0.4        // right flare <= lip height * this
+  property real searchLipCornerRatio: 0.55         // lip-end corner <= lip height * this
+  property real searchTopEdgeGuardRatio: 0.22      // keeps the top edge from inverting
+
+  // ---- MOTION -------------------------------------------------------------
+  property int searchOpenDuration: 380             // ms, open animation
+  property int searchCloseDuration: 260            // ms, close animation
+  property real searchOpenOvershoot: 1.08          // open spring overshoot
+  property real searchWidthPulse: 10               // sideways stretch mid-open (px)
+  property real searchHeightPulse: 6               // vertical stretch mid-open (px)
+
+  // Power action row inside the expanded panel
+  property real searchPowerButtonSize: 40
+  property real searchFooterHeight: 84
 
   // Search input bar styling (fully rounded pill)
   property real searchBarHeight: 46                // Search input height

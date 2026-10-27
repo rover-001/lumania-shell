@@ -10,6 +10,7 @@ Item {
   required property var frameConfig
   property int borderThickness: frameConfig.borderThickness
   property color islandColor: frameConfig.activeBorderColor
+  property bool fullscreen: false
   property bool barHidden: false
 
   readonly property real maxBottomRadius: Math.max(frameConfig.bottomLeftRadius, frameConfig.bottomRightRadius)
@@ -25,7 +26,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuardBottom.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuardBottom.remapping
 
         ScreenMoveRemap {
           id: remapGuardBottom
@@ -117,7 +118,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuardLeft.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuardLeft.remapping
 
         ScreenMoveRemap {
           id: remapGuardLeft
@@ -160,7 +161,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuardRight.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuardRight.remapping
 
         ScreenMoveRemap {
           id: remapGuardRight

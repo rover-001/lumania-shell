@@ -69,8 +69,8 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
     }
 
     let out = run_cmd(&[
-        "nmcli", "-t", "-f", "active,ssid,bssid,signal,security",
-        "dev", "wifi", "list", "--rescan", "no"
+        "nmcli", "-t", "-f", "in-use,ssid,signal,security",
+        "dev", "wifi", "list"
     ]);
 
     let mut networks: Vec<WifiNetwork> = Vec::new();
@@ -83,17 +83,23 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
         if line.is_empty() {
             continue;
         }
-        let parts: Vec<&str> = line.split(':').collect();
-        if parts.len() >= 4 {
-            let active = parts[0] == "yes";
-            let ssid = parts[1].replace("\\:", ":");
+        let is_active = line.starts_with('*');
+        let rest = if is_active {
+            line.strip_prefix("*:").unwrap_or(line)
+        } else {
+            line.strip_prefix(":").unwrap_or(line)
+        };
+
+        let parts: Vec<&str> = rest.split(':').collect();
+        if parts.len() >= 2 {
+            let ssid = parts[0].replace("\\:", ":").trim().to_string();
             if ssid.is_empty() {
                 continue;
             }
-            let signal = parts[parts.len() - 2].parse::<u32>().unwrap_or(50);
-            let sec = if parts.len() > 4 { parts[parts.len() - 1].to_string() } else { String::new() };
+            let signal = parts[1].trim().parse::<u32>().unwrap_or(50);
+            let sec = if parts.len() >= 3 { parts[2].trim().to_string() } else { String::new() };
 
-            if active && connected_ssid.is_empty() {
+            if is_active && connected_ssid.is_empty() {
                 connected_ssid = ssid.clone();
                 connected_signal = signal;
             }
@@ -104,7 +110,7 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
                     ssid,
                     signal,
                     security: sec,
-                    active,
+                    active: is_active,
                 });
             }
         }
@@ -166,55 +172,83 @@ fn get_bluetooth_status() -> BtStatus {
         };
     }
 
-    let dev_out = run_cmd(&["bluetoothctl", "devices"]);
-    let mut devices: Vec<BtDevice> = Vec::new();
-    let mut connected_count = 0;
-
-    for line in dev_out.lines() {
+    let connected_out = run_cmd(&["bluetoothctl", "devices", "Connected"]);
+    let mut connected_macs: HashSet<String> = HashSet::new();
+    for line in connected_out.lines() {
         if line.starts_with("Device ") {
             let parts: Vec<&str> = line.splitn(3, ' ').collect();
-            if parts.len() >= 3 {
-                let mac = parts[1].to_string();
-                let name = parts[2].to_string();
-                let info = run_cmd(&["bluetoothctl", "info", &mac]);
-
-                let conn = info.contains("Connected: yes");
-                let paired = info.contains("Paired: yes");
-                if conn {
-                    connected_count += 1;
-                }
-
-                let lname = name.to_lowercase();
-                let icon = if info.contains("Icon: audio-headset") || lname.contains("buds") || lname.contains("headphone") || lname.contains("airpod") {
-                    "headset"
-                } else if info.contains("Icon: input-gaming") || lname.contains("gamepad") || lname.contains("controller") || lname.contains("one s") {
-                    "gamepad"
-                } else if info.contains("Icon: phone") || lname.contains("realme") || lname.contains("iphone") || lname.contains("galaxy") {
-                    "phone"
-                } else if lname.contains("mouse") || lname.contains("pointer") {
-                    "mouse"
-                } else if lname.contains("keyboard") {
-                    "keyboard"
-                } else {
-                    "generic"
-                };
-
-                devices.push(BtDevice {
-                    mac,
-                    name,
-                    connected: conn,
-                    paired,
-                    icon: icon.to_string(),
-                });
+            if parts.len() >= 2 {
+                connected_macs.insert(parts[1].trim().to_uppercase());
             }
         }
     }
 
-    devices.sort_by(|a, b| {
-        b.connected.cmp(&a.connected)
-            .then_with(|| b.paired.cmp(&a.paired))
-            .then_with(|| a.name.cmp(&b.name))
-    });
+    let paired_out = run_cmd(&["bluetoothctl", "devices", "Paired"]);
+    let all_devices_out = run_cmd(&["bluetoothctl", "devices"]);
+    let mut devices: Vec<BtDevice> = Vec::new();
+    let mut seen_macs: HashSet<String> = HashSet::new();
+
+    let mut paired_macs: HashSet<String> = HashSet::new();
+    for line in paired_out.lines() {
+        if line.starts_with("Device ") {
+            let parts: Vec<&str> = line.splitn(3, ' ').collect();
+            if parts.len() >= 2 {
+                paired_macs.insert(parts[1].trim().to_uppercase());
+            }
+        }
+    }
+
+    // Helper closure to process lines and append devices
+    let mut process_lines = |lines: &str| {
+        for line in lines.lines() {
+            if line.starts_with("Device ") {
+                let parts: Vec<&str> = line.splitn(3, ' ').collect();
+                if parts.len() >= 3 {
+                    let mac = parts[1].trim().to_string();
+                    let mac_upper = mac.to_uppercase();
+                    let name = parts[2].trim().to_string();
+                    if !seen_macs.contains(&mac_upper) {
+                        seen_macs.insert(mac_upper.clone());
+                        let conn = connected_macs.contains(&mac_upper);
+                        let is_paired = paired_macs.contains(&mac_upper);
+                        let lname = name.to_lowercase();
+                        let icon = if lname.contains("buds") || lname.contains("headphone") || lname.contains("ear") || lname.contains("airpod") {
+                            "headset"
+                        } else if lname.contains("gamepad") || lname.contains("controller") || lname.contains("one s") {
+                            "gamepad"
+                        } else if lname.contains("phone") || lname.contains("realme") || lname.contains("iphone") || lname.contains("galaxy") {
+                            "phone"
+                        } else if lname.contains("mouse") {
+                            "mouse"
+                        } else if lname.contains("keyboard") {
+                            "keyboard"
+                        } else {
+                            "headset"
+                        };
+
+                        devices.push(BtDevice {
+                            mac,
+                            name,
+                            connected: conn,
+                            paired: is_paired,
+                            icon: icon.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    };
+
+    // 1. First add connected devices (highest priority)
+    process_lines(&connected_out);
+
+    // 2. Add all paired devices
+    process_lines(&paired_out);
+
+    // 3. Add all other known / trusted / discovered devices
+    process_lines(&all_devices_out);
+
+    let connected_count = connected_macs.len();
 
     BtStatus {
         enabled: true,

@@ -13,8 +13,9 @@ Item {
   property color islandTextColor: frameConfig.activeTextColor
   property color islandMutedColor: frameConfig.mutedColor
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
+  property bool fullscreen: false
   property bool barHidden: false
-  property int islandWindowHeight: 520
+  property int islandWindowHeight: 380
 
   Variants {
     model: Quickshell.screens
@@ -26,7 +27,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuard.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuard.remapping
 
         ScreenMoveRemap {
           id: remapGuard

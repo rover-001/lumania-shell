@@ -14,6 +14,7 @@ Item {
   property color notchColor: frameConfig.activeBorderColor
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   property var shell: null
+  property bool fullscreen: false
   property bool barHidden: false
 
   // Bottom Search Notch State & IPC Controller
@@ -29,6 +30,11 @@ Item {
 
   function closeSearch() {
     searchOpen = false
+  }
+
+  // Entering fullscreen always dismisses the search panel
+  onFullscreenChanged: {
+    if (fullscreen) root.closeSearch()
   }
 
   IpcHandler {
@@ -58,7 +64,7 @@ Item {
         required property var modelData
         screen: modelData
 
-        visible: !root.barHidden && !remapGuardSearch.remapping
+        visible: !root.barHidden && !root.fullscreen && !remapGuardSearch.remapping
 
         ScreenMoveRemap {
           id: remapGuardSearch

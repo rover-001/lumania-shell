@@ -1,5 +1,7 @@
 import Quickshell
 import QtQuick
+import Quickshell.Hyprland
+import Quickshell.Io
 import qs.Commons as Commons
 
 Item {
@@ -27,6 +29,57 @@ Item {
 
   // State consumed by host shell and overlays
   property bool barHidden: false
+
+  // True while the focused window is fullscreen: every lumania surface steps aside
+  property bool fullscreenActive: false
+
+  // HyprlandToplevel exposes no fullscreen flag in this Quickshell build, so ask
+  // Hyprland directly and refresh on every event that can change the answer.
+  Process {
+    id: fullscreenProbe
+    command: ["hyprctl", "activewindow", "-j"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var fullscreen = 0
+        var fullscreenClient = 0
+        var raw = String(text || "").trim()
+        if (raw.charAt(0) === "{") {
+          try {
+            var win = JSON.parse(raw)
+            fullscreen = Number(win.fullscreen || 0)
+            fullscreenClient = Number(win.fullscreenClient || 0)
+          } catch (err) {
+            console.warn("Lumania fullscreen probe failed:", err)
+          }
+        }
+        root.fullscreenActive = (fullscreen >= 2 || fullscreenClient >= 2)
+      }
+    }
+  }
+
+  function refreshFullscreen() {
+    if (!fullscreenProbe.running) fullscreenProbe.running = true
+  }
+
+  // Safety net: also catches state changes no Hyprland event announces
+  Timer {
+    interval: 1500
+    running: true
+    repeat: true
+    onTriggered: root.refreshFullscreen()
+  }
+
+  Connections {
+    target: Hyprland
+    function onRawEvent(event) {
+      var name = event ? String(event.name || "") : ""
+      if (name === "activewindow" || name === "activewindowv2" || name === "fullscreen"
+          || name === "workspace" || name === "focusedmon"
+          || name === "openwindow" || name === "closewindow" || name === "movewindow") {
+        root.refreshFullscreen()
+      }
+    }
+  }
   property int borderThickness: frameConfig.borderThickness
   property int barSize: borderThickness
   property int islandTopMargin: 8
@@ -72,6 +125,7 @@ Item {
     islandMutedColor: root.islandMutedColor
     fontFamily: root.fontFamily
     barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
   }
 
   // 2. Screen Frame Borders (Bottom, Left, Right bezel windows and dock margins)
@@ -80,6 +134,7 @@ Item {
     borderThickness: root.borderThickness
     islandColor: root.islandColor
     barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
   }
 
   // 3. Right Control Window (Hover notch & panel for volume, brightness, power)
@@ -88,6 +143,7 @@ Item {
     borderThickness: root.borderThickness
     notchColor: root.islandColor
     barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
   }
 
   // 4. Bottom Search Window (Search notch, command runner, and IPC handler)
@@ -99,5 +155,6 @@ Item {
     fontFamily: root.fontFamily
     shell: root.shell
     barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
   }
 }
