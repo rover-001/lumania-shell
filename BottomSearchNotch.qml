@@ -306,7 +306,7 @@ Item {
   }
 
   // =========================================================================
-  // Full-Screen Backdrop Dim & Click-Away Catcher
+  // Full-Screen Click-Away Catcher (no backdrop dimming)
   // =========================================================================
   Item {
     id: backdropOverlay
@@ -314,12 +314,6 @@ Item {
     width: root.isOpenEffective ? parent.width : 0
     height: root.isOpenEffective ? parent.height : 0
     visible: root.isOpenEffective && root.openProgress > 0.01
-
-    Rectangle {
-      anchors.fill: parent
-      color: Qt.rgba(0, 0, 0, 0.45)
-      opacity: root.openProgress
-    }
 
     MouseArea {
       anchors.fill: parent
@@ -386,6 +380,13 @@ Item {
       readonly property real rCorner: root.currentCornerRadius
       readonly property real b: root.borderThickness
 
+      // Available protrusion above the bottom border's top edge
+      readonly property real protrusion: Math.max(0, h - b)
+      // G1 squircle continuity: flare and corner partition the protrusion so the
+      // resting notch never self-intersects (no kinks / cut corners)
+      readonly property real effRf: Math.min(rFlare, Math.max(0.5, protrusion * 0.38))
+      readonly property real effRc: Math.max(0, Math.min(rCorner, protrusion - effRf))
+
       ShapePath {
         strokeWidth: 0
         strokeColor: "transparent"
@@ -405,57 +406,57 @@ Item {
 
         // Left concave flare curving smoothly from horizontal border upwards
         PathCubic {
-          x: notchShape.rFlare
-          y: notchShape.h - notchShape.b - notchShape.rFlare
-          control1X: notchShape.rFlare * 0.5
+          x: notchShape.effRf
+          y: notchShape.h - notchShape.b - notchShape.effRf
+          control1X: notchShape.effRf * 0.5
           control1Y: notchShape.h - notchShape.b
-          control2X: notchShape.rFlare
-          control2Y: notchShape.h - notchShape.b - (notchShape.rFlare * 0.5)
+          control2X: notchShape.effRf
+          control2Y: notchShape.h - notchShape.b - (notchShape.effRf * 0.5)
         }
 
         // Left vertical side up to top-left corner arc
         PathLine {
-          x: notchShape.rFlare
-          y: notchShape.rCorner
+          x: notchShape.effRf
+          y: notchShape.effRc
         }
 
         // Top-left convex corner arc
         PathArc {
-          x: notchShape.rFlare + notchShape.rCorner
+          x: notchShape.effRf + notchShape.effRc
           y: 0
-          radiusX: notchShape.rCorner
-          radiusY: notchShape.rCorner
+          radiusX: Math.max(1, notchShape.effRc)
+          radiusY: Math.max(1, notchShape.effRc)
           direction: PathArc.Clockwise
         }
 
         // Top horizontal edge
         PathLine {
-          x: notchShape.w - notchShape.rFlare - notchShape.rCorner
+          x: notchShape.w - notchShape.effRf - notchShape.effRc
           y: 0
         }
 
         // Top-right convex corner arc
         PathArc {
-          x: notchShape.w - notchShape.rFlare
-          y: notchShape.rCorner
-          radiusX: notchShape.rCorner
-          radiusY: notchShape.rCorner
+          x: notchShape.w - notchShape.effRf
+          y: notchShape.effRc
+          radiusX: Math.max(1, notchShape.effRc)
+          radiusY: Math.max(1, notchShape.effRc)
           direction: PathArc.Clockwise
         }
 
         // Right vertical side down to right flare
         PathLine {
-          x: notchShape.w - notchShape.rFlare
-          y: notchShape.h - notchShape.b - notchShape.rFlare
+          x: notchShape.w - notchShape.effRf
+          y: notchShape.h - notchShape.b - notchShape.effRf
         }
 
         // Right concave flare curving smoothly back down to horizontal border
         PathCubic {
           x: notchShape.w
           y: notchShape.h - notchShape.b
-          control1X: notchShape.w - notchShape.rFlare
-          control1Y: notchShape.h - notchShape.b - (notchShape.rFlare * 0.5)
-          control2X: notchShape.w - (notchShape.rFlare * 0.5)
+          control1X: notchShape.w - notchShape.effRf
+          control1Y: notchShape.h - notchShape.b - (notchShape.effRf * 0.5)
+          control2X: notchShape.w - (notchShape.effRf * 0.5)
           control2Y: notchShape.h - notchShape.b
         }
 
@@ -637,6 +638,21 @@ Item {
           cellWidth: Math.floor(width / Math.max(1, frameConfig.searchGridColumns))
           cellHeight: frameConfig.searchGridCellHeight
           boundsBehavior: Flickable.StopAtBounds
+          // Pre-instantiate a couple of rows so wheel scrolling never hitches
+          cacheBuffer: frameConfig.searchGridCellHeight * 2
+
+          // Snappier wheel / trackpad scrolling (the default Flickable step feels sluggish)
+          WheelHandler {
+            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+            onWheel: function(event) {
+              var delta = event.pixelDelta.y !== 0
+                ? event.pixelDelta.y * 2.0
+                : (event.angleDelta.y / 120) * frameConfig.searchGridCellHeight * 1.5
+              var maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
+              resultsGrid.contentY = Math.max(0, Math.min(maxY, resultsGrid.contentY - delta))
+              event.accepted = true
+            }
+          }
 
           delegate: Item {
             id: delegateRoot
