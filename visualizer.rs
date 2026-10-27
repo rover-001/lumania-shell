@@ -4,7 +4,9 @@ use std::time::{Duration, Instant};
 
 const CHUNK: usize = 512;
 const RATE: u32 = 22050;
-const NUM_BARS: usize = 22;
+const NUM_BANDS: usize = 9;
+const NUM_BARS: usize = 18;
+const HALF: usize = NUM_BARS / 2;
 const MIN_HEIGHT: f32 = 2.0;
 const MAX_HEIGHT: f32 = 18.0;
 
@@ -47,6 +49,28 @@ fn fft(real: &mut [f32; CHUNK], imag: &mut [f32; CHUNK]) {
     }
 }
 
+// Traveling wave: voice energy enters at the center and ripples outward to both sides.
+// A sine undulation rides on top so neighbouring bars form crests and troughs like a real wave,
+// and a smooth taper keeps the center tallest with the endings lower but still alive.
+fn push_ripple(ripple: &mut [f32; HALF], bars: &mut [f32; NUM_BARS], voice: f32, phase: &mut f32) {
+    for k in (1..HALF).rev() {
+        ripple[k] = ripple[k - 1] * 0.97;
+    }
+    ripple[0] = voice;
+    *phase += 0.55;
+    if *phase > std::f32::consts::TAU {
+        *phase -= std::f32::consts::TAU;
+    }
+    for k in 0..HALF {
+        let t = k as f32 / (HALF - 1) as f32;
+        let taper = 0.45 + 0.55 * (t * std::f32::consts::FRAC_PI_2).cos();
+        let undulate = 0.72 + 0.28 * (*phase - k as f32 * 0.85).sin();
+        let v = (ripple[k] * taper * undulate).clamp(0.0, 1.0);
+        bars[HALF - 1 - k] = v;
+        bars[HALF + k] = v;
+    }
+}
+
 fn spawn_capture() -> Option<Child> {
     Command::new("pw-record")
         .args(&[
@@ -69,28 +93,26 @@ fn spawn_capture() -> Option<Child> {
 }
 
 fn main() {
-    // Precompute Hanning window
     let mut hanning = [0.0f32; CHUNK];
     for i in 0..CHUNK {
         hanning[i] =
             0.5 * (1.0 - (2.0 * std::f32::consts::PI * (i as f32) / ((CHUNK - 1) as f32)).cos());
     }
 
-    // Frequency bands from 60 Hz to 8000 Hz (logarithmic distribution)
-    let min_f = 60.0f32;
-    let max_f = 8000.0f32;
+    // 9 frequency bands spanning 120 Hz to 6500 Hz
+    let min_f = 120.0f32;
+    let max_f = 6500.0f32;
     let freq_step = ((RATE as f32) / 2.0) / ((CHUNK / 2) as f32); // ~43.07 Hz
 
-    let mut band_indices = [(0usize, 1usize); NUM_BARS];
-    let mut band_boost = [1.0f32; NUM_BARS];
-    for i in 0..NUM_BARS {
-        let f1 = min_f * (max_f / min_f).powf((i as f32) / (NUM_BARS as f32));
-        let f2 = min_f * (max_f / min_f).powf(((i + 1) as f32) / (NUM_BARS as f32));
+    let mut band_indices = [(0usize, 1usize); NUM_BANDS];
+    for i in 0..NUM_BANDS {
+        let f1 = min_f * (max_f / min_f).powf((i as f32) / (NUM_BANDS as f32));
+        let f2 = min_f * (max_f / min_f).powf(((i + 1) as f32) / (NUM_BANDS as f32));
         let mut b1 = (f1 / freq_step).floor() as usize;
         let mut b2 = (f2 / freq_step).ceil() as usize;
         if b1 == 0 {
             b1 = 1;
-        } // Skip DC offset
+        }
         if b2 <= b1 {
             b2 = b1 + 1;
         }
@@ -101,14 +123,13 @@ fn main() {
             b1 = b2.saturating_sub(1);
         }
         band_indices[i] = (b1, b2);
-
-        // Compensate for natural pink-noise rolloff in higher frequencies
-        let progress = (i as f32) / ((NUM_BARS - 1) as f32);
-        band_boost[i] = 1.0 + 1.8 * progress.powf(1.15);
     }
 
     let mut smoothed = [0.0f32; NUM_BARS];
-    let mut peak_history = 0.20f32;
+    let mut level_peak = 0.05f32;
+    let mut voice = 0.0f32;
+    let mut ripple = [0.0f32; HALF];
+    let mut phase = 0.0f32;
 
     let mut child = match spawn_capture() {
         Some(c) => c,
@@ -128,11 +149,10 @@ fn main() {
     let mut out_str = String::with_capacity(128);
     let mut out_handle = stdout().lock();
     let mut last_emit = Instant::now();
-    let min_interval = Duration::from_millis(30); // Clean 33 FPS cadence for QML
+    let min_interval = Duration::from_millis(30);
 
     loop {
         if reader.read_exact(&mut raw_buf).is_err() {
-            // If pw-record terminated, wait briefly and try to restart
             let _ = child.kill();
             std::thread::sleep(Duration::from_millis(200));
             if let Some(mut new_child) = spawn_capture() {
@@ -157,12 +177,11 @@ fn main() {
         let now = Instant::now();
         let should_emit = now.duration_since(last_emit) >= min_interval;
 
-        // When audio is silent or paused, decay gently to baseline
+        // When audio is silent or paused, decay cleanly to baseline (2.0)
         if rms < 0.006 {
-            for i in 0..NUM_BARS {
-                smoothed[i] *= 0.72;
-            }
+            voice *= 0.70;
             if should_emit {
+                push_ripple(&mut ripple, &mut smoothed, voice, &mut phase);
                 last_emit = now;
                 out_str.clear();
                 for i in 0..NUM_BARS {
@@ -181,41 +200,47 @@ fn main() {
 
         fft(&mut real, &mut imag);
 
-        let mut frame_peak = 0.001f32;
         for i in 0..(CHUNK / 2) {
-            let m = (real[i] * real[i] + imag[i] * imag[i]).sqrt();
-            mag[i] = m;
-            if m > frame_peak {
-                frame_peak = m;
-            }
+            mag[i] = (real[i] * real[i] + imag[i] * imag[i]).sqrt();
         }
 
-        // Automatic Gain Control with fast rise and slow decay
-        if frame_peak > peak_history {
-            peak_history = peak_history * 0.75 + frame_peak * 0.25;
-        } else {
-            peak_history = (peak_history * 0.985).max(0.10);
-        }
-
-        for i in 0..NUM_BARS {
-            let (b1, b2) = band_indices[i];
+        // Raw band energy; normalized against a shared peak so bands keep their relative shape
+        let mut band_vals = [0.0f32; NUM_BANDS];
+        let mut frame_max = 0.0f32;
+        for b in 0..NUM_BANDS {
+            let (b1, b2) = band_indices[b];
             let count = (b2 - b1).max(1);
             let mut sum = 0.0f32;
-            for b in b1..b2 {
-                sum += mag[b];
+            for k in b1..b2 {
+                sum += mag[k];
             }
-            let band_val = (sum / (count as f32)) * band_boost[i];
+            band_vals[b] = sum / (count as f32);
+            frame_max = frame_max.max(band_vals[b]);
+        }
+        let mut band_norms = [0.0f32; NUM_BANDS];
+        for b in 0..NUM_BANDS {
+            band_norms[b] = (band_vals[b] / (frame_max + 1e-6)).sqrt();
+        }
 
-            // Calibrated dynamic range: prevents max-clipping across all bars
-            let mut norm = (band_val / (peak_history * 0.95 + 1e-4)).clamp(0.0, 1.0);
-            norm = norm.powf(0.82); // Perceptual loudness expansion
+        // Slow loudness AGC: fast rise, slow fall, so level reflects dynamics of the voice
+        if rms > level_peak {
+            level_peak = level_peak * 0.80 + rms * 0.20;
+        } else {
+            level_peak = (level_peak * 0.993).max(0.02);
+        }
+        let level = (rms / level_peak).clamp(0.0, 1.0).powf(0.6);
 
-            // Snappy attack, silky release
-            if norm > smoothed[i] {
-                smoothed[i] = smoothed[i] * 0.30 + norm * 0.70;
-            } else {
-                smoothed[i] = smoothed[i] * 0.75 + norm * 0.25;
-            }
+        // Feed the current voice level into the center of the ripple
+        let pulse = (level * (0.8 + 0.2 * band_norms[0].max(band_norms[1]))).clamp(0.0, 1.0);
+        if pulse > voice {
+            voice = voice * 0.35 + pulse * 0.65;
+        } else {
+            voice = voice * 0.88 + pulse * 0.12;
+            voice = voice.max(0.18 * level.sqrt());
+        }
+
+        if should_emit {
+            push_ripple(&mut ripple, &mut smoothed, voice, &mut phase);
         }
 
         if should_emit {

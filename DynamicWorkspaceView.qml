@@ -136,7 +136,7 @@ Item {
     id: waveform
     anchors.centerIn: parent
     active: root.showVisualizer
-    barCount: 22
+    barCount: 18
     barWidth: 3.5
     barSpacing: 3.5
     maxHeight: 18
