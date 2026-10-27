@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "lumania.island",
+  "name": "Lumania Island",
+  "version": "0.1.0",
+  "author": "rover",
+  "license": "MIT",
+  "description": "Dynamic Island status bar for Omarchy and Hyprland",
+  "kinds": [
+    "bar"
+  ],
+  "entryPoints": {
+    "bar": "IslandBar.qml"
+  }
+}
