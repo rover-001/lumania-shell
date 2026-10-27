@@ -20,6 +20,19 @@ Item {
   property color startColor: "#00f0ff"
   property color endColor: "#b026ff"
 
+  // Spring motion: every bar is a damped spring chasing its target from the visualizer.
+  // Rising is stiffer and slightly underdamped (a small springy overshoot),
+  // falling is heavier and settles without bouncing back up.
+  readonly property real springStiffness: 1400
+  readonly property real riseDamping: 40
+  readonly property real fallDamping: 55
+
+  property var springPos: []
+  property var springVel: []
+  property var displayHeights: []
+
+  property real lastFrameMs: Date.now()
+
   implicitWidth: (barCount * barWidth) + ((barCount - 1) * barSpacing)
   implicitHeight: maxHeight
 
@@ -39,8 +52,70 @@ Item {
     root.barColors = cols
   }
 
+  function ensureSpringState() {
+    if (springPos.length === barCount) return
+    var p = [], v = [], d = []
+    for (var i = 0; i < barCount; i++) {
+      p.push(minHeight)
+      v.push(0)
+      d.push(minHeight)
+    }
+    springPos = p
+    springVel = v
+    displayHeights = d
+  }
+
+  function targetFor(i) {
+    if (!barHeights || barHeights.length <= i) return minHeight
+    var t = Number(barHeights[i])
+    if (isNaN(t)) return minHeight
+    return Math.max(minHeight, Math.min(maxHeight, t))
+  }
+
+  // Advance all springs by dt seconds using fixed sub-steps for stable integration
+  function stepSprings(dt) {
+    ensureSpringState()
+    var p = springPos.slice()
+    var v = springVel.slice()
+    var remaining = Math.min(dt, 1 / 30)
+    var sub = 1 / 240
+
+    while (remaining > 0) {
+      var s = Math.min(sub, remaining)
+      for (var i = 0; i < barCount; i++) {
+        var t = targetFor(i)
+        var c = (t > p[i]) ? riseDamping : fallDamping
+        var a = springStiffness * (t - p[i]) - c * v[i]
+        v[i] += a * s
+        p[i] += v[i] * s
+      }
+      remaining -= s
+    }
+
+    var out = []
+    for (var k = 0; k < barCount; k++) {
+      out.push(Math.max(0, Math.min(maxHeight, p[k])))
+    }
+    springPos = p
+    springVel = v
+    displayHeights = out
+  }
+
   Component.onCompleted: {
     initColors()
+    ensureSpringState()
+  }
+
+  // Per-frame driver, runs at display refresh rate while the visualizer is active
+  FrameAnimation {
+    id: springDriver
+    running: root.active
+    onTriggered: {
+      var now = Date.now()
+      var dt = (now - root.lastFrameMs) / 1000
+      root.lastFrameMs = now
+      root.stepSprings(dt)
+    }
   }
 
   // Native compiled Rust visualizer process
@@ -78,22 +153,15 @@ Item {
           ? root.barColors[index]
           : root.startColor
 
-        // Continuous fluid hardware interpolation: center high, cascading smoothly to flanks
-        height: (root.barHeights && root.barHeights.length > bar.index)
-          ? Math.max(root.minHeight, Math.min(root.maxHeight, Number(root.barHeights[bar.index])))
+        // Driven by the per-frame spring simulation (no Behavior, so no stepping)
+        height: (root.displayHeights && root.displayHeights.length > bar.index)
+          ? root.displayHeights[bar.index]
           : root.minHeight
 
         // Derived from the bar's own height (single driver): invisible at rest,
         // fades and swells in as the voice wave reaches it
         readonly property real energy: Math.max(0, Math.min(1, (height - root.minHeight) / (root.maxHeight - root.minHeight)))
         opacity: Math.min(1.0, energy * 6.0)
-
-        Behavior on height {
-          NumberAnimation {
-            duration: 60
-            easing.type: Easing.OutQuad
-          }
-        }
       }
     }
   }
