@@ -15,6 +15,7 @@ Item {
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   property bool fullscreen: false
   property bool barHidden: false
+  property bool hasOpenApps: false
   property int islandWindowHeight: 380
 
   Variants {
@@ -135,6 +136,7 @@ Item {
           islandTextColor: root.islandTextColor
           islandMutedColor: root.islandMutedColor
           fontFamily: root.fontFamily
+          hasOpenApps: root.hasOpenApps
         }
       }
     }

@@ -19,6 +19,7 @@ Item {
   property var shell: null
   property bool isOpen: false       // Manual open from keybind or IPC (owned by the host)
   property bool isHoverOpen: false  // Hover open from mouse interaction
+  property bool hasOpenApps: false
   // Local open request. Never assigned to isOpen: writing isOpen here would
   // destroy the host's `isOpen: root.searchOpen` binding, which permanently
   // disconnected the notch from the IPC/keybind state after the first Esc.
@@ -27,7 +28,7 @@ Item {
   // cannot instantly re-open it.
   property bool hoverSuppressed: false
 
-  readonly property bool isHovered: Boolean(notchHover && notchHover.hovered)
+  readonly property bool isHovered: Boolean(notchHover && notchHover.hovered) || Boolean(edgeTriggerHover && edgeTriggerHover.hovered)
   readonly property bool isTyping: Boolean(searchInput && searchInput.text.length > 0)
   readonly property bool isOpenEffective: root.isOpen || root.requestedOpen
     || (!root.hoverSuppressed && (root.isHoverOpen || root.isHovered))
@@ -365,8 +366,36 @@ Item {
     // hovering anywhere on the far-left bottom corner opens it.
     anchors.leftMargin: 0
 
+    // Auto-retract inward when apps are opened; springs up immediately when cursor touches bottom-left edge
+    readonly property bool shouldRetract: root.hasOpenApps && !root.isOpenEffective
+    readonly property real targetRetractOffset: shouldRetract ? -(root.collapsedHeight - root.borderThickness) : 0.0
+    property real currentRetractOffset: targetRetractOffset
+
+    Behavior on currentRetractOffset {
+      NumberAnimation {
+        duration: notchContainer.shouldRetract ? 280 : 380
+        easing.type: notchContainer.shouldRetract ? Easing.OutCubic : Easing.OutBack
+        easing.overshoot: 1.08
+      }
+    }
+
+    anchors.bottomMargin: currentRetractOffset
+
     width: root.currentWidth
     height: root.currentHeight
+
+    // Bottom-Left Edge Trigger: wakes retracted notch when mouse touches corner
+    Item {
+      anchors.bottom: parent.bottom
+      anchors.left: parent.left
+      anchors.bottomMargin: -notchContainer.currentRetractOffset
+      width: Math.max(64, root.collapsedWidth)
+      height: root.borderThickness + 14
+
+      HoverHandler {
+        id: edgeTriggerHover
+      }
+    }
 
     // OLED Theme Color: follows the theme tone instantly.
     // The host (IslandBar) already animates islandColor over 500ms, so a second

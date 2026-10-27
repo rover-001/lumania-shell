@@ -18,6 +18,7 @@ Item {
   property color islandMutedColor: frameConfig.mutedColor
   property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   property string iconFont: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
+  property bool hasOpenApps: false
 
   // Dynamic Island Geometry
   readonly property int bodyWidth: frameConfig.islandBodyWidth
@@ -55,34 +56,57 @@ Item {
 
   // -------------------------------------------------------------
   // MPRIS Media Detection & Track Capability Evaluation
+  // Excludes voice calls (Discord, WhatsApp, Zoom, Teams, WebRTC)
   // -------------------------------------------------------------
+  function isCallOrComm(p) {
+    if (!p) return false
+    var id = String(p.identity || "").toLowerCase()
+    var title = String(p.trackTitle || "").toLowerCase()
+    var artist = String(p.trackArtist || "").toLowerCase()
+    if (id.indexOf("discord") !== -1 || id.indexOf("whatsapp") !== -1 ||
+        id.indexOf("telegram") !== -1 || id.indexOf("slack") !== -1 ||
+        id.indexOf("zoom") !== -1 || id.indexOf("teams") !== -1 ||
+        id.indexOf("skype") !== -1 || id.indexOf("webrtc") !== -1) {
+      return true
+    }
+    return false
+  }
+
   function getActivePlayer() {
     var players = Mpris.players ? Mpris.players.values : []
-    // 1. Any player actively playing with track metadata or skip capabilities
+    // 1. Any player actively playing with track metadata or skip capabilities (non-call)
     for (var i = 0; i < players.length; i++) {
       var p = players[i]
-      if (p && p.isPlaying && (p.trackTitle || p.trackArtist || p.canGoNext || p.canGoPrevious)) {
+      if (p && p.isPlaying && !root.isCallOrComm(p) && (p.trackTitle || p.trackArtist || p.canGoNext || p.canGoPrevious)) {
         return p
       }
     }
-    // 2. Any player actively playing
+    // 2. Any player actively playing (non-call)
     for (var j = 0; j < players.length; j++) {
       var q = players[j]
-      if (q && q.isPlaying) return q
+      if (q && q.isPlaying && !root.isCallOrComm(q)) return q
     }
-    // 3. Any player with metadata
+    // 3. Any player with metadata (non-call)
     for (var k = 0; k < players.length; k++) {
       var r = players[k]
-      if (r && (r.trackTitle || r.trackArtist)) return r
+      if (r && !root.isCallOrComm(r) && (r.trackTitle || r.trackArtist)) return r
     }
-    return players.length > 0 ? players[0] : null
+    return null
   }
 
   readonly property var activePlayer: getActivePlayer()
 
+  // Actual media is active only when an authentic music/video player is playing or has track data
+  readonly property bool hasActualMedia: Boolean(
+    activePlayer && !root.isCallOrComm(activePlayer) && (
+      (activePlayer.isPlaying && (activePlayer.trackTitle || activePlayer.trackArtist || activePlayer.canGoNext || activePlayer.canGoPrevious)) ||
+      (activePlayer.trackTitle && activePlayer.trackTitle.length > 0)
+    )
+  )
+
   // Video or song (has track metadata or skip capabilities), not a call or general audio
   readonly property bool isSkippable: Boolean(
-    activePlayer && (
+    activePlayer && !root.isCallOrComm(activePlayer) && (
       activePlayer.canGoNext ||
       activePlayer.canGoPrevious ||
       (activePlayer.trackTitle && activePlayer.trackTitle.length > 0)
@@ -106,6 +130,19 @@ Item {
     function onValuesChanged() { root.activePlayerChanged() }
   }
 
+  // Fixed Top Edge Trigger Strip: stays at y=0 so cursor touching top border wakes retracted notch immediately
+  Item {
+    id: edgeTriggerItem
+    anchors.top: parent.top
+    anchors.horizontalCenter: parent.horizontalCenter
+    width: root.islandWidth
+    height: root.borderThickness + 14
+
+    HoverHandler {
+      id: edgeTriggerHover
+    }
+  }
+
   // -------------------------------------------------------------
   // Centered Dynamic Island Notch with Smooth Animated Sizing
   // -------------------------------------------------------------
@@ -115,9 +152,24 @@ Item {
     anchors.horizontalCenter: parent.horizontalCenter
 
     // Hover interaction state (stays active while subpanel is open, hovered, or pinned)
-    readonly property bool isHovered: islandHover.hovered || (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
+    readonly property bool isHovered: islandHover.hovered || edgeTriggerHover.hovered || (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
+
+    // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
+    readonly property bool shouldRetract: root.hasOpenApps && !islandContainer.isHovered && islandContainer.hoverProgress < 0.05
+    readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
+    property real currentRetractY: targetRetractY
+
+    Behavior on currentRetractY {
+      NumberAnimation {
+        duration: islandContainer.shouldRetract ? 280 : 380
+        easing.type: islandContainer.shouldRetract ? Easing.OutCubic : Easing.OutBack
+        easing.overshoot: 1.08
+      }
+    }
+
+    y: currentRetractY
 
     // iOS Fluid Spring Behavior for hover
     // Expanding: snappy energetic spring (400ms, OutBack overshoot 1.08)
@@ -131,14 +183,14 @@ Item {
     }
 
     // iOS Fluid Motion driver value: 0.0 (Clock View) -> 1.0 (Audio Waveform)
-    readonly property real targetProgress: dynamicView.showVisualizer ? 1.0 : 0.0
+    readonly property real targetProgress: (dynamicView.showVisualizer && root.hasActualMedia) ? 1.0 : 0.0
     property real transitionProgress: targetProgress
 
     Behavior on transitionProgress {
       NumberAnimation {
-        duration: dynamicView.showVisualizer ? 380 : 220
-        easing.type: dynamicView.showVisualizer ? Easing.OutBack : Easing.OutCubic
-        easing.overshoot: dynamicView.showVisualizer ? 1.15 : 1.0
+        duration: (dynamicView.showVisualizer && root.hasActualMedia) ? 380 : 220
+        easing.type: (dynamicView.showVisualizer && root.hasActualMedia) ? Easing.OutBack : Easing.OutCubic
+        easing.overshoot: (dynamicView.showVisualizer && root.hasActualMedia) ? 1.15 : 1.0
       }
     }
 
@@ -150,7 +202,7 @@ Item {
 
     // Height expansion delta: taller when idle (+42px down to 79px) to fit 48px circles,
     // and sleek when media is playing (+24px down to 61px) to fit 44px media controls
-    readonly property real activeHoverHeightDelta: dynamicView.showVisualizer
+    readonly property real activeHoverHeightDelta: (dynamicView.showVisualizer && root.hasActualMedia)
       ? root.frameConfig.islandHoverHeightDeltaMedia
       : root.frameConfig.islandHoverHeightDeltaIdle
 
@@ -377,11 +429,11 @@ Item {
       anchors.centerIn: parent
       anchors.verticalCenterOffset: root.borderThickness * 0.5
       spacing: 18
-      opacity: (islandContainer.hoverProgress > 0.15 && dynamicView.showVisualizer)
+      opacity: (islandContainer.hoverProgress > 0.15 && dynamicView.showVisualizer && root.hasActualMedia)
         ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
         : 0.0
       scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && dynamicView.showVisualizer
+      visible: opacity > 0.01 && dynamicView.showVisualizer && root.hasActualMedia
       transformOrigin: Item.Center
 
       // 1. Skip Previous Track (Shown only for videos/songs, hidden on calls)
@@ -541,11 +593,11 @@ Item {
       anchors.centerIn: parent
       anchors.verticalCenterOffset: root.borderThickness * 0.5
       spacing: 20
-      opacity: (islandContainer.hoverProgress > 0.15 && !dynamicView.showVisualizer)
+      opacity: (islandContainer.hoverProgress > 0.15 && (!dynamicView.showVisualizer || !root.hasActualMedia))
         ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
         : 0.0
       scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && !dynamicView.showVisualizer
+      visible: opacity > 0.01 && (!dynamicView.showVisualizer || !root.hasActualMedia)
       transformOrigin: Item.Center
 
       // 1. Wi-Fi Big Circular Button

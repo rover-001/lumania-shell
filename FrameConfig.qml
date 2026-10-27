@@ -79,19 +79,69 @@ QtObject {
   property int islandHoverHeightDeltaMedia: 24      // Height expansion when media playing (fits media controls)
 
   // =========================================================================
-  // RIGHT CONTROL NOTCH CONSTANTS
+  // BOTTOM-RIGHT CONTROL CENTER — EDIT SHAPE HERE
   // =========================================================================
-  // Resting width: protrusion past border (e.g. 5) or total width (e.g. 15-20)
-  property real rightCollapsedWidth: 5
-  property real rightExpandedWidth: 98
-  property real rightCollapsedHeight: 200
-  property real rightExpandedHeight: 540
+  // Mirrors the bottom-left search gusset: a low lip along the BOTTOM border
+  // plus a finger climbing the RIGHT border. Clicking the corner blooms the
+  // control menu upwards like a start menu.
+  //
+  //     ╭───────────  <- top edge when open
+  //     │        ▐    <- finger width
+  //     └──╮     │    <- lip height / finger height
+  //        ╰─────┘    <- lip length along the bottom
 
-  // Right notch corner & flare radii:
-  property real rightCornerRadius: 15             // Outer corner radius when closed
-  property real rightExpandedCornerRadius: 28     // Outer corner radius when opened
-  property real rightFlareRadius: 6               // Concave flare radius when closed
-  property real rightExpandedFlareRadius: 18      // Concave flare radius when opened
+  // ---- WIDTH --------------------------------------------------------------
+  // Lip length: how far the resting gusset reaches left along the bottom
+  property real controlCollapsedWidth: 110
+  // Finger width: the part merged into the right border
+  property real controlRightTabWidth: 10
+  // Panel width when the control menu is open
+  property real controlExpandedWidth: 248
+
+  // ---- HEIGHT -------------------------------------------------------------
+  // Lip rise above the bottom border
+  property real controlCollapsedHeight: 5
+  // Finger height: how far the gusset climbs up the right border
+  property real controlRightTabHeight: 100
+  // Panel height when the control menu is open
+  property real controlExpandedHeight: 236
+
+  // ---- CURVES / RADII -----------------------------------------------------
+  property real controlTabCapRadius: 5
+  property real controlInnerRadius: 12
+  property real controlCornerRadius: 10
+  property real controlFlareRadius: 12
+  property real controlExpandedCornerRadius: 20
+  property real controlExpandedFlareRadius: 12
+  property real controlCurveTension: 0.55
+
+  // ---- MOTION (start-menu bloom) ------------------------------------------
+  property int controlOpenDuration: 380            // ms, energetic spring open
+  property int controlCloseDuration: 260           // ms, damped settle
+  property real controlOpenOvershoot: 1.08         // OutBack overshoot
+
+  // ---- CONTENT ------------------------------------------------------------
+  property real controlButtonSize: 54              // Wi-Fi / Bluetooth circles
+  property real controlPowerButtonSize: 54         // Power profile circles (same size as bt and wifi)
+  property real controlSliderWidth: 124            // Horizontal slider width
+  property real controlSliderHeight: 54           // Horizontal slider height (matches 54px buttons)
+
+  // =========================================================================
+  // TOP-LEFT WORKSPACE NOTCH CONSTANTS (VERTICAL 1-COLUMN ON LEFT BORDER)
+  // =========================================================================
+  // Vertical distance from top screen edge (top-left, a little lower)
+  property real workspaceTopMargin: 68
+  // Total protrusion width from left screen edge
+  property real workspaceWidth: 54
+  // Vertical height containing the 1-column workspaces downwise
+  property real workspaceHeight: 216
+  // Corner and concave flare radii
+  property real workspaceCornerRadius: 16
+  property real workspaceFlareRadius: 8
+  // Animation durations and physics
+  property int workspaceOpenDuration: 380         // ms, iOS energetic spring open
+  property int workspaceCloseDuration: 260        // ms, iOS critically damped settle
+  property real workspaceOpenOvershoot: 1.08      // iOS OutBack spring overshoot
 
   // =========================================================================
   // TOP NOTCH STATUS & FLUID SUBPANEL CONSTANTS (MINIMAL UNIBODY)

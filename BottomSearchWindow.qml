@@ -16,6 +16,7 @@ Item {
   property var shell: null
   property bool fullscreen: false
   property bool barHidden: false
+  property bool hasOpenApps: false
 
   // Bottom Search Notch State & IPC Controller
   property bool searchOpen: false
@@ -104,6 +105,7 @@ Item {
           fontFamily: root.fontFamily
           shell: root.shell
           isOpen: root.searchOpen
+          hasOpenApps: root.hasOpenApps
 
           onOpenRequested: root.openSearch()
           onCloseRequested: root.closeSearch()

@@ -30,54 +30,49 @@ Item {
   // State consumed by host shell and overlays
   property bool barHidden: false
 
-  // True while the focused window is fullscreen: every lumania surface steps aside
+  // Fast reactive Hyprland probe tracking workspace window count and fullscreen state
   property bool fullscreenActive: false
+  property bool hasOpenApps: false
 
-  // HyprlandToplevel exposes no fullscreen flag in this Quickshell build, so ask
-  // Hyprland directly and refresh on every event that can change the answer.
   Process {
-    id: fullscreenProbe
-    command: ["hyprctl", "activewindow", "-j"]
+    id: workspaceStateProbe
+    command: ["sh", "-c", "ws=$(hyprctl activeworkspace -j 2>/dev/null); win=$(hyprctl activewindow -j 2>/dev/null); echo \"$ws $win\" | jq -r -s \"((.[0].windows // 0 | tostring) + \\\" \\\" + ((.[0].hasfullscreen == true or (.[1].fullscreen != null and .[1].fullscreen > 0) or (.[1].fullscreenClient != null and .[1].fullscreenClient > 0)) | if . then \\\"1\\\" else \\\"0\\\" end))\" 2>/dev/null"]
     stdout: StdioCollector {
       onStreamFinished: {
-        var fullscreen = 0
-        var fullscreenClient = 0
-        var raw = String(text || "").trim()
-        if (raw.charAt(0) === "{") {
-          try {
-            var win = JSON.parse(raw)
-            fullscreen = Number(win.fullscreen || 0)
-            fullscreenClient = Number(win.fullscreenClient || 0)
-          } catch (err) {
-            console.warn("Lumania fullscreen probe failed:", err)
-          }
+        var raw = String(text || "").trim().split(/\s+/)
+        if (raw.length >= 2) {
+          var winCount = parseInt(raw[0], 10) || 0
+          var isFull = (raw[1] === "1")
+          root.hasOpenApps = (winCount > 0)
+          root.fullscreenActive = isFull
         }
-        root.fullscreenActive = (fullscreen >= 2 || fullscreenClient >= 2)
       }
     }
   }
 
-  function refreshFullscreen() {
-    if (!fullscreenProbe.running) fullscreenProbe.running = true
+  function syncWorkspaceState() {
+    if (!workspaceStateProbe.running) workspaceStateProbe.running = true
   }
 
-  // Safety net: also catches state changes no Hyprland event announces
+  Component.onCompleted: {
+    root.syncWorkspaceState()
+  }
+
+  // Fast periodic check ensuring immediate recovery on empty workspaces
   Timer {
-    interval: 1500
+    interval: 350
     running: true
     repeat: true
-    onTriggered: root.refreshFullscreen()
+    onTriggered: root.syncWorkspaceState()
   }
 
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      var name = event ? String(event.name || "") : ""
-      if (name === "activewindow" || name === "activewindowv2" || name === "fullscreen"
-          || name === "workspace" || name === "focusedmon"
-          || name === "openwindow" || name === "closewindow" || name === "movewindow") {
-        root.refreshFullscreen()
-      }
+      root.syncWorkspaceState()
+    }
+    function onFocusedWorkspaceChanged() {
+      root.syncWorkspaceState()
     }
   }
   property int borderThickness: frameConfig.borderThickness
@@ -126,6 +121,7 @@ Item {
     fontFamily: root.fontFamily
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
   }
 
   // 2. Screen Frame Borders (Bottom, Left, Right bezel windows and dock margins)
@@ -137,14 +133,23 @@ Item {
     fullscreen: root.fullscreenActive
   }
 
-  // 3. Right Control Window (Hover notch & panel for volume, brightness, power)
-  RightControlWindow {
+  // 3. Bottom-Right Control Center (corner gusset blooming into Wi-Fi/Bluetooth,
+  //    brightness/volume and power profiles — replaces the old right notch)
+  ControlCenterWindow {
+    id: controlCenterWindow
     frameConfig: frameConfig
     borderThickness: root.borderThickness
     notchColor: root.islandColor
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
   }
+
+  // Forward control menu convenience methods
+  property alias controlOpen: controlCenterWindow.controlOpen
+  function toggleControl() { controlCenterWindow.toggleControl() }
+  function openControl() { controlCenterWindow.openControl() }
+  function closeControl() { controlCenterWindow.closeControl() }
 
   // 4. Bottom Search Window (Search notch, command runner, and IPC handler)
   BottomSearchWindow {
@@ -156,5 +161,19 @@ Item {
     shell: root.shell
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
+  }
+
+  // 5. Left Workspace Window (Top-left workspace notch showing active workspace with iOS fluid animations)
+  WorkspaceWindow {
+    frameConfig: frameConfig
+    borderThickness: root.borderThickness
+    notchColor: root.islandColor
+    textColor: root.islandTextColor
+    mutedColor: root.islandMutedColor
+    fontFamily: root.fontFamily
+    barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
   }
 }

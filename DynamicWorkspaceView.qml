@@ -11,12 +11,27 @@ Item {
   property bool mprisPlaying: false
   property bool nonMprisPlaying: false
 
+  // Filter out calls, communication streams, and players without track metadata
+  function isCallOrComm(p) {
+    if (!p) return false
+    var id = String(p.identity || "").toLowerCase()
+    var title = String(p.trackTitle || "").toLowerCase()
+    var artist = String(p.trackArtist || "").toLowerCase()
+    if (id.indexOf("discord") !== -1 || id.indexOf("whatsapp") !== -1 ||
+        id.indexOf("telegram") !== -1 || id.indexOf("slack") !== -1 ||
+        id.indexOf("zoom") !== -1 || id.indexOf("teams") !== -1 ||
+        id.indexOf("skype") !== -1 || id.indexOf("webrtc") !== -1) {
+      return true
+    }
+    return false
+  }
+
   // Reactive evaluation of MPRIS playback across all active players
   function recheckMpris() {
     var players = Mpris.players ? Mpris.players.values : []
     for (var i = 0; i < players.length; i++) {
       var p = players[i]
-      if (p && p.isPlaying) {
+      if (p && p.isPlaying && !root.isCallOrComm(p) && (p.trackTitle || p.trackArtist || p.canGoNext || p.canGoPrevious)) {
         root.mprisPlaying = true
         return
       }
@@ -73,7 +88,7 @@ Item {
   // Explicitly excludes lingering uncorked buffers from paused MPRIS browsers and players
   Process {
     id: sinkInputCheck
-    command: ["sh", "-c", "pactl list sink-inputs 2>/dev/null | awk 'BEGIN { uncorked=0; mpris=0; count=0 } /Sink Input/ { if (uncorked && !mpris) count++; uncorked=0; mpris=0 } /Corked: no/ { uncorked=1 } tolower($0) ~ /application\\.name = \"(chromium|chrome|firefox|zen|brave|opera|vivaldi|spotify|mpv|vlc|amberol)/ { mpris=1 } END { if (uncorked && !mpris) count++; if (count > 0) exit 0; exit 1 }'"]
+    command: ["sh", "-c", "pactl list sink-inputs 2>/dev/null | awk 'BEGIN { uncorked=0; mpris=0; call=0; count=0 } /Sink Input/ { if (uncorked && !mpris && !call) count++; uncorked=0; mpris=0; call=0 } /Corked: no/ { uncorked=1 } tolower($0) ~ /application\\.name = \"(chromium|chrome|firefox|zen|brave|opera|vivaldi|spotify|mpv|vlc|amberol)/ { mpris=1 } tolower($0) ~ /(webrtc|voiceengine|discord|whatsapp|telegram|slack|zoom|teams|skype|call|signal)/ { call=1 } END { if (uncorked && !mpris && !call) count++; if (count > 0) exit 0; exit 1 }'"]
     onExited: function(code) {
       root.nonMprisPlaying = (code === 0)
       if (root.sinkCheckPending) {
