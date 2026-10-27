@@ -663,10 +663,21 @@ Item {
           Layout.preferredHeight: frameConfig.searchBarHeight
           radius: frameConfig.searchBarRadius
           color: frameConfig.searchFieldBg
-          border.color: searchInput.activeFocus ? Qt.rgba(255, 255, 255, 0.32) : Qt.rgba(255, 255, 255, 0.16)
+          border.color: searchInput.activeFocus ? Qt.rgba(255, 255, 255, 0.38) : Qt.rgba(255, 255, 255, 0.14)
           border.width: 1
 
           Behavior on border.color { ColorAnimation { duration: 180 } }
+
+          // Subtle top highlight reflection line
+          Rectangle {
+            anchors.top: parent.top
+            anchors.topMargin: 1
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: parent.width - 32
+            height: 1
+            color: Qt.rgba(255, 255, 255, 0.16)
+            radius: 1
+          }
 
           RowLayout {
             anchors.fill: parent
@@ -679,7 +690,8 @@ Item {
               text: "\uf002"
               font.family: root.iconFont
               font.pixelSize: 15
-              color: frameConfig.activeTextColor
+              color: searchInput.activeFocus ? frameConfig.activeTextColor : frameConfig.mutedColor
+              Behavior on color { ColorAnimation { duration: 150 } }
               renderType: Text.NativeRendering
             }
 
@@ -724,11 +736,20 @@ Item {
 
             // Clear button ('×')
             Rectangle {
+              id: clearBtn
               width: 24
               height: 24
               radius: 12
-              color: clearHover.hovered ? Qt.rgba(255, 255, 255, 0.22) : Qt.rgba(255, 255, 255, 0.10)
+              color: clearHover.hovered
+                ? Qt.rgba(255, 255, 255, 0.25)
+                : (clearTap.pressed ? Qt.rgba(255, 255, 255, 0.35) : Qt.rgba(255, 255, 255, 0.12))
+              border.color: clearHover.hovered ? Qt.rgba(255, 255, 255, 0.30) : "transparent"
+              border.width: 1
+              scale: clearTap.pressed ? 0.90 : (clearHover.hovered ? 1.08 : 1.0)
               visible: searchInput.text.length > 0
+
+              Behavior on color { ColorAnimation { duration: 120 } }
+              Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
 
               HoverHandler {
                 id: clearHover
@@ -736,6 +757,7 @@ Item {
               }
 
               TapHandler {
+                id: clearTap
                 onTapped: {
                   searchInput.text = ""
                   searchInput.forceActiveFocus()
@@ -746,179 +768,291 @@ Item {
                 anchors.centerIn: parent
                 text: "✕"
                 font.pixelSize: 11
-                color: frameConfig.activeTextColor
+                color: clearHover.hovered ? "#ffffff" : frameConfig.activeTextColor
               }
             }
 
-            // Escape Hint Badge (Pill)
+            // Escape Keycap Button (Interactive Dismissal)
             Rectangle {
-              height: 22
-              width: escLabel.implicitWidth + 12
-              radius: 11
-              color: Qt.rgba(255, 255, 255, 0.12)
+              id: escBtn
+              height: 24
+              width: escRow.implicitWidth + 14
+              radius: 7
+              color: escHover.hovered
+                ? Qt.rgba(255, 255, 255, 0.22)
+                : (escTap.pressed ? Qt.rgba(255, 255, 255, 0.30) : Qt.rgba(255, 255, 255, 0.10))
+              border.color: escHover.hovered ? Qt.rgba(255, 255, 255, 0.30) : Qt.rgba(255, 255, 255, 0.16)
+              border.width: 1
+              scale: escTap.pressed ? 0.92 : (escHover.hovered ? 1.05 : 1.0)
 
-              Text {
-                id: escLabel
+              Behavior on color { ColorAnimation { duration: 120 } }
+              Behavior on scale { NumberAnimation { duration: 140; easing.type: Easing.OutBack } }
+
+              HoverHandler {
+                id: escHover
+                cursorShape: Qt.PointingHandCursor
+              }
+
+              TapHandler {
+                id: escTap
+                onTapped: root.close()
+              }
+
+              Row {
+                id: escRow
                 anchors.centerIn: parent
-                text: "ESC"
-                font.family: root.fontFamily
-                font.pixelSize: 10
-                font.weight: Font.DemiBold
-                color: frameConfig.mutedColor
-                renderType: Text.NativeRendering
+                spacing: 3
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "⎋"
+                  font.pixelSize: 11
+                  color: escHover.hovered ? "#ffffff" : frameConfig.activeTextColor
+                }
+
+                Text {
+                  anchors.verticalCenter: parent.verticalCenter
+                  text: "esc"
+                  font.family: root.fontFamily
+                  font.pixelSize: 10
+                  font.weight: Font.DemiBold
+                  color: escHover.hovered ? "#ffffff" : frameConfig.activeTextColor
+                  renderType: Text.NativeRendering
+                }
               }
             }
           }
         }
 
-        // Application Results Grid (iOS-Style App Grid)
-        GridView {
-          id: resultsGrid
+        // Application Results Grid Area with iOS-style Scroll Indicator
+        Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
-          clip: true
-          model: root.filteredApps
-          cellWidth: Math.floor(width / Math.max(1, frameConfig.searchGridColumns))
-          cellHeight: frameConfig.searchGridCellHeight
-          boundsBehavior: Flickable.StopAtBounds
-          // Pre-instantiate a couple of rows so wheel scrolling never hitches
-          cacheBuffer: frameConfig.searchGridCellHeight * 2
 
-          // Snappier wheel / trackpad scrolling (the default Flickable step feels sluggish)
-          WheelHandler {
-            acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
-            onWheel: function(event) {
-              var delta = event.pixelDelta.y !== 0
-                ? event.pixelDelta.y * 2.0
-                : (event.angleDelta.y / 120) * frameConfig.searchGridCellHeight * 1.5
-              var maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
-              resultsGrid.contentY = Math.max(0, Math.min(maxY, resultsGrid.contentY - delta))
-              event.accepted = true
-            }
-          }
+          GridView {
+            id: resultsGrid
+            anchors.fill: parent
+            clip: true
+            model: root.filteredApps
+            cellWidth: Math.floor(width / Math.max(1, frameConfig.searchGridColumns))
+            cellHeight: frameConfig.searchGridCellHeight
+            boundsBehavior: Flickable.StopAtBounds
+            cacheBuffer: frameConfig.searchGridCellHeight * 2
 
-          delegate: Item {
-            id: delegateRoot
-            width: resultsGrid.cellWidth
-            height: resultsGrid.cellHeight
-
-            readonly property bool isSelected: index === root.selectedIndex
-            readonly property bool isHovered: itemHover.hovered
-
-            // Highlight card
-            Rectangle {
-              anchors.fill: parent
-              anchors.margins: 4
-              radius: 14
-              color: delegateRoot.isSelected
-                ? frameConfig.searchItemActiveBg
-                : (delegateRoot.isHovered ? frameConfig.searchItemHoverBg : "transparent")
-              border.color: delegateRoot.isSelected ? frameConfig.searchItemActiveBorder : "transparent"
-              border.width: 1
-
-              Behavior on color { ColorAnimation { duration: 120 } }
+            onContentYChanged: {
+              if (scrollTimer) scrollTimer.restart()
             }
 
-            // Tactile scale feedback on press
-            scale: itemTap.pressed ? 0.94 : 1.0
-            Behavior on scale { NumberAnimation { duration: 100 } }
-
-            HoverHandler {
-              id: itemHover
-              cursorShape: Qt.PointingHandCursor
-              onHoveredChanged: {
-                if (hovered) root.selectedIndex = index
+            // Snappier wheel / trackpad scrolling
+            WheelHandler {
+              acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+              onWheel: function(event) {
+                var delta = event.pixelDelta.y !== 0
+                  ? event.pixelDelta.y * 2.0
+                  : (event.angleDelta.y / 120) * frameConfig.searchGridCellHeight * 1.5
+                var maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
+                resultsGrid.contentY = Math.max(0, Math.min(maxY, resultsGrid.contentY - delta))
+                event.accepted = true
               }
             }
 
-            TapHandler {
-              id: itemTap
-              onTapped: root.launchItem(modelData)
-            }
+            delegate: Item {
+              id: delegateRoot
+              width: resultsGrid.cellWidth
+              height: resultsGrid.cellHeight
 
-            ColumnLayout {
-              anchors.centerIn: parent
-              spacing: 6
-              width: parent.width - 12
+              readonly property bool isSelected: index === root.selectedIndex
+              readonly property bool isHovered: itemHover.hovered
 
-              // App Icon with iOS rounded squircle container
+              // Outer selection card: transparent when unselected, soft glass highlight when selected
               Rectangle {
-                Layout.alignment: Qt.AlignHCenter
-                width: 48
-                height: 48
-                radius: 12
-                color: Qt.rgba(255, 255, 255, 0.08)
+                anchors.fill: parent
+                anchors.margins: 3
+                radius: 14
+                color: delegateRoot.isSelected
+                  ? frameConfig.searchItemActiveBg
+                  : (delegateRoot.isHovered ? frameConfig.searchItemHoverBg : "transparent")
+                border.color: delegateRoot.isSelected ? frameConfig.searchItemActiveBorder : "transparent"
+                border.width: 1
 
-                Image {
-                  anchors.centerIn: parent
-                  width: 36
-                  height: 36
-                  sourceSize.width: 72
-                  sourceSize.height: 72
-                  source: {
-                    var ic = modelData.icon || ""
-                    if (!ic) return Quickshell.iconPath("application-x-executable", true)
-                    if (ic.indexOf("/") >= 0 || ic.indexOf("file://") === 0) return ic
-                    return Quickshell.iconPath(ic, true)
-                  }
-                  fillMode: Image.PreserveAspectFit
+                Behavior on color { ColorAnimation { duration: 120 } }
+                Behavior on border.color { ColorAnimation { duration: 120 } }
+              }
+
+              // Tactile spring scale feedback
+              scale: itemTap.pressed ? 0.93 : (delegateRoot.isSelected ? 1.03 : 1.0)
+              Behavior on scale {
+                NumberAnimation {
+                  duration: itemTap.pressed ? 100 : 220
+                  easing.type: itemTap.pressed ? Easing.OutQuad : Easing.OutBack
+                  easing.overshoot: 1.15
                 }
               }
 
-              // App Name (Centered, Crisp, Elided)
-              Text {
-                Layout.fillWidth: true
-                text: modelData.name || ""
-                font.family: root.fontFamily
-                font.pixelSize: 11
-                font.weight: delegateRoot.isSelected ? Font.DemiBold : Font.Normal
-                color: frameConfig.activeTextColor
-                horizontalAlignment: Text.AlignHCenter
-                elide: Text.ElideRight
-                maximumLineCount: 1
-                renderType: Text.NativeRendering
+              HoverHandler {
+                id: itemHover
+                cursorShape: Qt.PointingHandCursor
+                onHoveredChanged: {
+                  if (hovered) root.selectedIndex = index
+                }
+              }
+
+              TapHandler {
+                id: itemTap
+                onTapped: root.launchItem(modelData)
+              }
+
+              ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 5
+                width: parent.width - 10
+
+                // App Icon Container: cleanly renders squircle without nested double-box artifacts
+                Rectangle {
+                  Layout.alignment: Qt.AlignHCenter
+                  width: 48
+                  height: 48
+                  radius: 13
+                  // Transparent when selected so icon sits directly inside the outer card highlight
+                  color: delegateRoot.isSelected
+                    ? "transparent"
+                    : (delegateRoot.isHovered ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(0, 0, 0, 0.18))
+                  border.color: delegateRoot.isSelected ? "transparent" : Qt.rgba(255, 255, 255, 0.08)
+                  border.width: 1
+
+                  Behavior on color { ColorAnimation { duration: 140 } }
+
+                  // Terminal icon indicator for command runner
+                  Item {
+                    anchors.fill: parent
+                    visible: Boolean(modelData && modelData.isCommand)
+
+                    Text {
+                      anchors.centerIn: parent
+                      text: "󰞷"
+                      font.family: root.iconFont
+                      font.pixelSize: 22
+                      color: frameConfig.activeTextColor
+                      renderType: Text.NativeRendering
+                    }
+                  }
+
+                  // Application Desktop Icon
+                  Image {
+                    id: appIconImg
+                    anchors.centerIn: parent
+                    width: 34
+                    height: 34
+                    sourceSize.width: 68
+                    sourceSize.height: 68
+                    visible: !(modelData && modelData.isCommand)
+                    source: {
+                      var ic = modelData.icon || ""
+                      if (!ic) return Quickshell.iconPath("application-x-executable", true)
+                      if (ic.indexOf("/") >= 0 || ic.indexOf("file://") === 0) return ic
+                      return Quickshell.iconPath(ic, true)
+                    }
+                    fillMode: Image.PreserveAspectFit
+                    asynchronous: true
+                  }
+
+                  // Fallback letter initial if icon asset is unavailable
+                  Text {
+                    anchors.centerIn: parent
+                    visible: !(modelData && modelData.isCommand) && (appIconImg.status === Image.Error || appIconImg.status === Image.Null || !appIconImg.source)
+                    text: modelData.name && modelData.name.length > 0 ? modelData.name.charAt(0).toUpperCase() : "󰘔"
+                    font.family: root.fontFamily
+                    font.pixelSize: 18
+                    font.weight: Font.Bold
+                    color: frameConfig.activeTextColor
+                    renderType: Text.NativeRendering
+                  }
+                }
+
+                // App Name Label (Centered, Crisp, Elided)
+                Text {
+                  Layout.fillWidth: true
+                  text: modelData.name || ""
+                  font.family: root.fontFamily
+                  font.pixelSize: 11
+                  font.weight: delegateRoot.isSelected ? Font.DemiBold : Font.Normal
+                  color: delegateRoot.isSelected ? "#ffffff" : frameConfig.activeTextColor
+                  horizontalAlignment: Text.AlignHCenter
+                  elide: Text.ElideRight
+                  maximumLineCount: 1
+                  renderType: Text.NativeRendering
+                }
+              }
+            }
+
+            // Empty Results State
+            Item {
+              anchors.centerIn: parent
+              width: parent.width - 40
+              height: 100
+              visible: root.filteredApps.length === 0
+
+              ColumnLayout {
+                anchors.centerIn: parent
+                spacing: 8
+
+                Text {
+                  Layout.alignment: Qt.AlignHCenter
+                  text: "No applications found"
+                  font.family: root.fontFamily
+                  font.pixelSize: 14
+                  font.weight: Font.DemiBold
+                  color: frameConfig.activeTextColor
+                  renderType: Text.NativeRendering
+                }
+
+                Text {
+                  Layout.alignment: Qt.AlignHCenter
+                  text: "Try searching with a different keyword"
+                  font.family: root.fontFamily
+                  font.pixelSize: 11
+                  color: frameConfig.mutedColor
+                  renderType: Text.NativeRendering
+                }
               }
             }
           }
 
-          // Empty Results State
-          Item {
-            anchors.centerIn: parent
-            width: parent.width - 40
-            height: 100
-            visible: root.filteredApps.length === 0
+          // iOS-style subtle floating scroll indicator
+          Rectangle {
+            id: scrollIndicator
+            anchors.right: parent.right
+            anchors.rightMargin: 1
+            width: 3.5
+            radius: 1.75
+            color: Qt.rgba(255, 255, 255, 0.38)
+            visible: resultsGrid.contentHeight > resultsGrid.height
 
-            ColumnLayout {
-              anchors.centerIn: parent
-              spacing: 8
+            property real visibleRatio: Math.min(1.0, resultsGrid.height / Math.max(1, resultsGrid.contentHeight))
+            height: Math.max(22, (resultsGrid.height - 8) * visibleRatio)
+            property real maxContentY: Math.max(1, resultsGrid.contentHeight - resultsGrid.height)
+            property real scrollNorm: Math.max(0.0, Math.min(1.0, resultsGrid.contentY / maxContentY))
+            y: 4 + (scrollNorm * (resultsGrid.height - 8 - height))
 
-              Text {
-                Layout.alignment: Qt.AlignHCenter
-                text: "No applications found"
-                font.family: root.fontFamily
-                font.pixelSize: 14
-                font.weight: Font.DemiBold
-                color: frameConfig.activeTextColor
-                renderType: Text.NativeRendering
-              }
+            opacity: (resultsGrid.moving || resultsGrid.flicking || (scrollTimer && scrollTimer.running)) ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 250 } }
 
-              Text {
-                Layout.alignment: Qt.AlignHCenter
-                text: "Try searching with a different keyword"
-                font.family: root.fontFamily
-                font.pixelSize: 11
-                color: frameConfig.mutedColor
-                renderType: Text.NativeRendering
-              }
+            Timer {
+              id: scrollTimer
+              interval: 900
+              running: false
+              repeat: false
             }
           }
         }
 
-        // Power Actions Footer (Suspend / Hibernate / Restart / Power off)
+        // Refined Apple HIG Control Bar & Power Dock
+        // Refined Footer with Improved Tactile Power Buttons (Zero text)
         Item {
           Layout.fillWidth: true
           Layout.preferredHeight: frameConfig.searchFooterHeight
 
+          // Hairline divider
           Rectangle {
             anchors.top: parent.top
             anchors.left: parent.left
@@ -929,31 +1063,55 @@ Item {
 
           Row {
             anchors.left: parent.left
-            anchors.top: parent.top
-            anchors.topMargin: 14
-            spacing: 16
+            anchors.leftMargin: 6
+            anchors.verticalCenter: parent.verticalCenter
+            spacing: 14
 
             Repeater {
               model: root.powerActions
 
-              delegate: Column {
-                spacing: 6
+              delegate: Item {
+                width: frameConfig.searchPowerButtonSize
+                height: frameConfig.searchPowerButtonSize
 
                 Rectangle {
                   id: powerButton
+                  anchors.centerIn: parent
                   width: frameConfig.searchPowerButtonSize
                   height: frameConfig.searchPowerButtonSize
                   radius: width / 2
-                  anchors.horizontalCenter: parent.horizontalCenter
 
-                  color: powerArea.containsMouse
-                    ? Qt.rgba(1, 1, 1, 0.28)
-                    : frameConfig.powerButtonInactiveBg
-                  scale: powerArea.pressed ? 0.92 : 1.0
+                  readonly property bool isPowerOff: index === 3
+                  readonly property bool isRestart: index === 2
+                  readonly property bool isHibernate: index === 1
+                  readonly property bool isSuspend: index === 0
 
-                  Behavior on color { ColorAnimation { duration: 180 } }
+                  color: {
+                    if (powerTap.pressed) return Qt.rgba(255, 255, 255, 0.35)
+                    if (powerHover.hovered) {
+                      if (isPowerOff) return Qt.rgba(235, 65, 65, 0.38)
+                      if (isRestart) return Qt.rgba(245, 175, 45, 0.35)
+                      if (isHibernate) return Qt.rgba(165, 105, 245, 0.35)
+                      return Qt.rgba(85, 165, 245, 0.35)
+                    }
+                    return frameConfig.powerButtonInactiveBg
+                  }
+
+                  border.color: powerHover.hovered
+                    ? Qt.rgba(255, 255, 255, 0.38)
+                    : Qt.rgba(255, 255, 255, 0.14)
+                  border.width: 1
+
+                  scale: powerTap.pressed ? 0.90 : (powerHover.hovered ? 1.08 : 1.0)
+
+                  Behavior on color { ColorAnimation { duration: 150 } }
+                  Behavior on border.color { ColorAnimation { duration: 150 } }
                   Behavior on scale {
-                    NumberAnimation { duration: 140; easing.type: Easing.OutQuad }
+                    NumberAnimation {
+                      duration: 160
+                      easing.type: Easing.OutBack
+                      easing.overshoot: 1.15
+                    }
                   }
 
                   Text {
@@ -961,26 +1119,19 @@ Item {
                     text: modelData.glyph
                     font.family: root.iconFont
                     font.pixelSize: 19
-                    color: frameConfig.powerButtonInactiveIcon
+                    color: powerHover.hovered ? "#ffffff" : frameConfig.powerButtonInactiveIcon
                     renderType: Text.NativeRendering
                   }
 
-                  MouseArea {
-                    id: powerArea
-                    anchors.fill: parent
-                    hoverEnabled: true
+                  HoverHandler {
+                    id: powerHover
                     cursorShape: Qt.PointingHandCursor
-                    onClicked: root.runPowerAction(modelData.command)
                   }
-                }
 
-                Text {
-                  anchors.horizontalCenter: parent.horizontalCenter
-                  text: modelData.label
-                  font.family: root.fontFamily
-                  font.pixelSize: 9
-                  color: frameConfig.mutedColor
-                  renderType: Text.NativeRendering
+                  TapHandler {
+                    id: powerTap
+                    onTapped: root.runPowerAction(modelData.command)
+                  }
                 }
               }
             }

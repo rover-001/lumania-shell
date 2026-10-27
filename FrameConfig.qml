@@ -130,7 +130,7 @@ QtObject {
   // Finger height: how far the gusset climbs up the left border
   property real searchLeftTabHeight: 100
   // Panel height when the search is open
-  property real searchExpandedHeight: 460
+  property real searchExpandedHeight: 580
 
   // ---- CURVES / RADII -----------------------------------------------------
   // Rounded cap on the finger's free end (0 = square top)
@@ -161,18 +161,18 @@ QtObject {
   property real searchHeightPulse: 6               // vertical stretch mid-open (px)
 
   // Power action row inside the expanded panel
-  property real searchPowerButtonSize: 40
-  property real searchFooterHeight: 84
+  property real searchPowerButtonSize: 42
+  property real searchFooterHeight: 60
 
   // Search input bar styling (fully rounded pill)
   property real searchBarHeight: 46                // Search input height
   property real searchBarRadius: 23                // Search input fully rounded capsule radius
   property int searchGridColumns: 5                // Number of grid columns for applications
-  property real searchGridCellHeight: 96           // Height per app grid cell
+  property real searchGridCellHeight: 92           // Height per app grid cell
   property color searchFieldBg: Qt.rgba(0, 0, 0, 0.28)
   property color searchItemHoverBg: Qt.rgba(255, 255, 255, 0.08)
   property color searchItemActiveBg: Qt.rgba(255, 255, 255, 0.16)
-  property color searchItemActiveBorder: Qt.rgba(255, 255, 255, 0.22)
+  property color searchItemActiveBorder: Qt.rgba(255, 255, 255, 0.24)
 
   // =========================================================================
   // PROGRESS BAR & SLIDER THEME CONSTANTS
