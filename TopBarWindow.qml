@@ -63,12 +63,6 @@ Item {
           Region {
             item: topRightCorner
           }
-          Region {
-            item: dynamicIsland.subpanelMaskItem
-          }
-          Region {
-            item: dynamicIsland.dismissMaskItem
-          }
         }
 
         // Full-width top border bar

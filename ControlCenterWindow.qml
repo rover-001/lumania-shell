@@ -17,6 +17,7 @@ Item {
 
   // Bottom-Right Control Menu State & IPC Controller
   property bool controlOpen: false
+  property string statusTabRequest: ""
 
   function toggleControl() {
     controlOpen = !controlOpen
@@ -48,6 +49,10 @@ Item {
 
     function close(): void {
       root.closeControl()
+    }
+
+    function status(tab: string): void {
+      root.statusTabRequest = tab
     }
   }
 
@@ -89,11 +94,17 @@ Item {
           Region {
             item: controlNotch.backdropItem
           }
+          Region {
+            item: controlNotch.subpanelMaskItem
+          }
         }
 
         ControlCenterNotch {
           id: controlNotch
           anchors.fill: parent
+          debugTab: root.statusTabRequest
+          onDebugTabChanged: if (debugTab) controlNotch.debugStatus(debugTab)
+          frameConfig: root.frameConfig
           borderThickness: root.borderThickness
           notchColor: root.notchColor
           hasOpenApps: root.hasOpenApps

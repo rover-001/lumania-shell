@@ -27,10 +27,8 @@ Item {
   readonly property int islandHeight: borderThickness + 32
   readonly property int bottomCornerRadius: frameConfig.islandBottomCornerRadius
 
-  // Mask items exposed to PanelWindow
+  // Mask item exposed to PanelWindow
   readonly property Item islandMaskItem: islandContainer
-  readonly property Item subpanelMaskItem: (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.openProgress > 0.01)) ? statusSubpanel.maskItem : null
-  readonly property Item dismissMaskItem: (statusSubpanel && statusSubpanel.isPinned) ? dismissArea : null
 
   // Clock state & formatting
   property string currentTimeString: ""
@@ -151,13 +149,16 @@ Item {
     anchors.top: parent.top
     anchors.horizontalCenter: parent.horizontalCenter
 
-    // Hover interaction state (stays active while subpanel is open, hovered, or pinned)
-    readonly property bool isHovered: islandHover.hovered || edgeTriggerHover.hovered || (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
+    // Hover interaction state (pointer presence also wakes a retracted island)
+    readonly property bool isPointerOver: islandHover.hovered || edgeTriggerHover.hovered
+    // The island only morphs open when there is actual media to control;
+    // status toggles now live in the bottom-right control center notch.
+    readonly property bool isHovered: isPointerOver && root.hasActualMedia && dynamicView.showVisualizer
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
     // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
-    readonly property bool shouldRetract: root.hasOpenApps && !islandContainer.isHovered && islandContainer.hoverProgress < 0.05
+    readonly property bool shouldRetract: root.hasOpenApps && !isPointerOver && islandContainer.hoverProgress < 0.05
     readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
     property real currentRetractY: targetRetractY
 
@@ -584,270 +585,5 @@ Item {
       }
     }
 
-    // =========================================================================
-    // Content Layer 3B: Opened While Idle (Big Circular Buttons for WiFi, BT, DNS)
-    // Hovering over each button drops down its corresponding subpanel!
-    // =========================================================================
-    Row {
-      id: statusControlsRow
-      anchors.centerIn: parent
-      anchors.verticalCenterOffset: root.borderThickness * 0.5
-      spacing: 20
-      opacity: (islandContainer.hoverProgress > 0.15 && (!dynamicView.showVisualizer || !root.hasActualMedia))
-        ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
-        : 0.0
-      scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && (!dynamicView.showVisualizer || !root.hasActualMedia)
-      transformOrigin: Item.Center
-
-      // 1. Wi-Fi Big Circular Button
-      Rectangle {
-        id: btnWifi
-        width: 48
-        height: 48
-        radius: 24
-        anchors.verticalCenter: parent.verticalCenter
-
-        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "wifi")
-        readonly property bool isPressed: wifiArea.pressed
-
-        color: isSelectedTab
-          ? root.frameConfig.powerButtonActiveBg
-          : (wifiArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
-
-        scale: isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
-
-        Behavior on scale {
-          NumberAnimation {
-            duration: btnWifi.isPressed ? 120 : 240
-            easing.type: btnWifi.isPressed ? Easing.OutQuad : Easing.OutBack
-            easing.overshoot: 1.15
-          }
-        }
-        Behavior on color {
-          ColorAnimation { duration: 180 }
-        }
-
-        Text {
-          anchors.centerIn: parent
-          text: {
-            if (!statusSubpanel || !statusSubpanel.wifiData || !statusSubpanel.wifiData.enabled) return "󰤮"
-            if (!statusSubpanel.wifiData.connected) return "󰤯"
-            var sig = statusSubpanel.wifiData.signal || 50
-            if (sig > 75) return "󰤨"
-            if (sig > 50) return "󰤥"
-            if (sig > 25) return "󰤢"
-            return "󰤟"
-          }
-          font.family: root.iconFont
-          font.pixelSize: 22
-          color: btnWifi.isSelectedTab
-            ? root.frameConfig.powerButtonActiveIcon
-            : root.frameConfig.powerButtonInactiveIcon
-          renderType: Text.NativeRendering
-        }
-
-        MouseArea {
-          id: wifiArea
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onEntered: {
-            statusSubpanel.activeTab = "wifi"
-            statusSubpanel.isOpen = true
-          }
-          onClicked: {
-            statusSubpanel.activeTab = "wifi"
-            statusSubpanel.isPinned = !statusSubpanel.isPinned
-            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
-          }
-        }
-      }
-
-      // 2. Bluetooth Big Circular Button
-      Rectangle {
-        id: btnBluetooth
-        width: 48
-        height: 48
-        radius: 24
-        anchors.verticalCenter: parent.verticalCenter
-
-        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "bluetooth")
-        readonly property bool isPressed: btArea.pressed
-
-        color: isSelectedTab
-          ? root.frameConfig.powerButtonActiveBg
-          : (btArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
-
-        scale: isPressed ? 0.90 : (btArea.containsMouse ? 1.08 : 1.0)
-
-        Behavior on scale {
-          NumberAnimation {
-            duration: btnBluetooth.isPressed ? 120 : 240
-            easing.type: btnBluetooth.isPressed ? Easing.OutQuad : Easing.OutBack
-            easing.overshoot: 1.15
-          }
-        }
-        Behavior on color {
-          ColorAnimation { duration: 180 }
-        }
-
-        Text {
-          anchors.centerIn: parent
-          text: {
-            if (!statusSubpanel || !statusSubpanel.btData || !statusSubpanel.btData.enabled) return "󰂲"
-            if (statusSubpanel.btData.connectedCount > 0) return "󰂱"
-            return "󰂯"
-          }
-          font.family: root.iconFont
-          font.pixelSize: 22
-          color: btnBluetooth.isSelectedTab
-            ? root.frameConfig.powerButtonActiveIcon
-            : root.frameConfig.powerButtonInactiveIcon
-          renderType: Text.NativeRendering
-        }
-
-        MouseArea {
-          id: btArea
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onEntered: {
-            statusSubpanel.activeTab = "bluetooth"
-            statusSubpanel.isOpen = true
-          }
-          onClicked: {
-            statusSubpanel.activeTab = "bluetooth"
-            statusSubpanel.isPinned = !statusSubpanel.isPinned
-            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
-          }
-        }
-      }
-
-      // 3. DNS Big Circular Button
-      Rectangle {
-        id: btnDns
-        width: 48
-        height: 48
-        radius: 24
-        anchors.verticalCenter: parent.verticalCenter
-
-        readonly property bool isSelectedTab: Boolean(statusSubpanel && statusSubpanel.isOpen && statusSubpanel.activeTab === "dns")
-        readonly property bool isPressed: dnsArea.pressed
-
-        color: isSelectedTab
-          ? root.frameConfig.powerButtonActiveBg
-          : (dnsArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg)
-
-        scale: isPressed ? 0.90 : (dnsArea.containsMouse ? 1.08 : 1.0)
-
-        Behavior on scale {
-          NumberAnimation {
-            duration: btnDns.isPressed ? 120 : 240
-            easing.type: btnDns.isPressed ? Easing.OutQuad : Easing.OutBack
-            easing.overshoot: 1.15
-          }
-        }
-        Behavior on color {
-          ColorAnimation { duration: 180 }
-        }
-
-        Text {
-          anchors.centerIn: parent
-          text: "󰒃"
-          font.family: root.iconFont
-          font.pixelSize: 22
-          color: btnDns.isSelectedTab
-            ? root.frameConfig.powerButtonActiveIcon
-            : root.frameConfig.powerButtonInactiveIcon
-          renderType: Text.NativeRendering
-        }
-
-        MouseArea {
-          id: dnsArea
-          anchors.fill: parent
-          hoverEnabled: true
-          cursorShape: Qt.PointingHandCursor
-          onEntered: {
-            statusSubpanel.activeTab = "dns"
-            statusSubpanel.isOpen = true
-          }
-          onClicked: {
-            statusSubpanel.activeTab = "dns"
-            statusSubpanel.isPinned = !statusSubpanel.isPinned
-            if (statusSubpanel.isPinned) statusSubpanel.isOpen = true
-          }
-        }
-      }
-    }
-  }
-
-  // -------------------------------------------------------------
-  // Invisible Hover Bridge between Top Notch and Subpanel
-  // -------------------------------------------------------------
-  Item {
-    id: hoverBridge
-    anchors.top: islandContainer.bottom
-    anchors.bottom: statusSubpanel.top
-    anchors.horizontalCenter: islandContainer.horizontalCenter
-    width: statusSubpanel.width
-    visible: statusSubpanel.isOpen || statusSubpanel.openProgress > 0.01
-
-    HoverHandler {
-      id: bridgeHover
-    }
-  }
-
-  // -------------------------------------------------------------
-  // Dropdown Subpanel below Top Notch (Fluid iOS Spring Motion)
-  // Flush unibody attachment: sticks directly to the notch!
-  // -------------------------------------------------------------
-  TopNotchSubpanel {
-    id: statusSubpanel
-    frameConfig: root.frameConfig
-    anchors.top: islandContainer.bottom
-    anchors.topMargin: root.frameConfig.statusSubpanelTopMargin
-    anchors.horizontalCenter: islandContainer.horizontalCenter
-    fontFamily: root.fontFamily
-  }
-
-  // -------------------------------------------------------------
-  // Outside Click Dismiss Handler when Subpanel is Pinned
-  // -------------------------------------------------------------
-  MouseArea {
-    id: dismissArea
-    anchors.fill: parent
-    enabled: statusSubpanel.isPinned
-    z: -1
-    onClicked: {
-      statusSubpanel.isPinned = false
-      statusSubpanel.isOpen = false
-    }
-  }
-
-  // -------------------------------------------------------------
-  // Graceful Hover Close Timer for Subpanel
-  // -------------------------------------------------------------
-  Timer {
-    id: subpanelCloseTimer
-    interval: 240
-    repeat: false
-    onTriggered: {
-      if (!statusSubpanel.isPinned && !islandHover.hovered && !bridgeHover.hovered && !statusSubpanel.isHovered) {
-        statusSubpanel.isOpen = false
-      }
-    }
-  }
-
-  readonly property bool isSubpanelAreaHovered: islandHover.hovered || bridgeHover.hovered || statusSubpanel.isHovered
-
-  onIsSubpanelAreaHoveredChanged: {
-    if (isSubpanelAreaHovered) {
-      subpanelCloseTimer.stop()
-    } else {
-      if (!statusSubpanel.isPinned) {
-        subpanelCloseTimer.restart()
-      }
-    }
   }
 }

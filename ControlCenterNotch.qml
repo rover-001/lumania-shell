@@ -16,16 +16,26 @@ import Quickshell.Io
 //    - Row 2: Horizontal Brightness slider capsule (left to right fill)
 //    - Row 3: Horizontal Volume slider capsule (left to right fill)
 //    - Row 4: Power profile circular buttons (Low power, Balanced, Performance)
+//    - Row 5: Battery capsule (bottom-most row)
+//  • Motion follows iOS fluid interfaces: every driver value is a spring that
+//    carries velocity through interruption (FluidSpring), never a duration +
+//    easing curve. Sliders track the finger 1:1 and only spring when the value
+//    changes without a finger.
+//  • Hovering Wi-Fi / Bluetooth blooms the matching status subpanel to the LEFT
+//    of the card (network list, device list) — identical behaviour to the top
+//    island's dropdown subpanel. Clicking pins it.
 // ===========================================================================
 Item {
   id: root
 
-  FrameConfig {
-    id: frameConfig
-  }
+  // Injected so the panel shares the live wallpaper-extracted palette instead of
+  // spinning up a private FrameConfig with default colours.
+  required property var frameConfig
 
   property int borderThickness: frameConfig.borderThickness
   property color notchColor: frameConfig.activeBorderColor
+  readonly property var frame: frameConfig
+  property string fontFamily: "Adwaita Sans, Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif"
   property bool isOpen: false
   property bool hasOpenApps: false
 
@@ -38,17 +48,35 @@ Item {
 
   readonly property bool isOpenEffective: root.isOpen || root.isHoverOpen || root.isPinned
 
+  // The window owns the authoritative open state; if it drops (IPC close,
+  // fullscreen entry), clear every local latch so nothing lingers open.
+  onIsOpenChanged: {
+    if (!root.isOpen) {
+      root.isPinned = false
+      root.isHoverOpen = false
+      if (statusSubpanel) statusSubpanel.close()
+    }
+  }
+
   function open() {
-    root.isPinned = true
+    // Opening never pins: the panel follows the pointer, so leaving it for the
+    // desktop dismisses it just like a hover-opened bloom.
+    root.isHoverOpen = true
     root.openRequested()
     root.refreshAll()
     root.refreshStatus()
+    root.refreshMotionPreference()
   }
 
   function close() {
     root.isPinned = false
     root.isHoverOpen = false
+    root.closeSubpanel()
     root.closeRequested()
+  }
+
+  function closeSubpanel() {
+    if (statusSubpanel) statusSubpanel.close()
   }
 
   function toggle() {
@@ -59,11 +87,50 @@ Item {
   // Grace period so the menu doesn't snap shut while the cursor crosses a gap
   Timer {
     id: hoverCloseTimer
-    interval: 180
+    interval: 240
     repeat: false
     onTriggered: {
-      if (!root.isPinned && !root.isOpen) root.isHoverOpen = false
+      var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+      if (statusSubpanel && statusSubpanel.isOpen && !statusSubpanel.isPinned
+          && !notchHover.hovered && !subpanelHovered) {
+        statusSubpanel.isOpen = false
+      }
+      if (!root.isPinned && !root.isOpen && !notchHover.hovered && !subpanelHovered) {
+        root.isHoverOpen = false
+      }
     }
+  }
+
+  // Pointer watchdog -------------------------------------------------------
+  // Hover-exit events are not guaranteed (fast warps, surface leaves, pointer
+  // grabs), which used to leave the card or its subpanel stuck open. Poll the
+  // real containment instead and retract once the pointer is truly gone.
+  property bool pointerEngaged: true
+  property int outsideTicks: 0
+
+  function syncPointerWatchdog() {
+    var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+    var inside = notchHover.hovered || subpanelHovered
+    if (inside) {
+      root.pointerEngaged = true
+      root.outsideTicks = 0
+      return
+    }
+    if (!root.pointerEngaged || root.isPinned) return
+    root.outsideTicks++
+    // Two ticks (~360ms) of separation so a diagonal pass over the gap between
+    // the card and the subpanel does not slam it shut.
+    if (root.outsideTicks < 2) return
+    root.outsideTicks = 0
+    root.pointerEngaged = false
+    root.close()
+  }
+
+  Timer {
+    interval: 180
+    repeat: true
+    running: root.isOpenEffective
+    onTriggered: root.syncPointerWatchdog()
   }
 
   // Sizing bounds driven by FrameConfig
@@ -81,16 +148,20 @@ Item {
 
   // Driver value: 0.0 (resting gusset) -> 1.0 (full control menu)
   readonly property real targetProgress: root.isOpenEffective ? 1.0 : 0.0
-  property real openProgress: targetProgress
 
-  Behavior on openProgress {
-    NumberAnimation {
-      duration: root.isOpenEffective ? frameConfig.controlOpenDuration
-                                     : frameConfig.controlCloseDuration
-      easing.type: root.isOpenEffective ? Easing.OutBack : Easing.OutCubic
-      easing.overshoot: root.isOpenEffective ? frameConfig.controlOpenOvershoot : 1.0
-    }
+  // Large surface: slower, heavier spring. Present ~0.42s at zeta 0.85 (0.6%
+  // settle overshoot); dismiss ~0.34s critically damped so it never bounces on
+  // the way back into the frame. Retargeting mid-flight keeps velocity.
+  FluidSpring {
+    id: bloomSpring
+    target: root.targetProgress
+    response: root.isOpenEffective ? 0.42 : 0.34
+    dampingFraction: root.isOpenEffective ? 0.85 : 1.0
+    epsilon: 0.0004
+    reduceMotion: root.reduceMotion
   }
+
+  readonly property real openProgress: bloomSpring.value
 
   // iOS liquid stretch: sinusoidal volume pulse mid-transition
   readonly property real currentWidth: collapsedWidth
@@ -104,6 +175,8 @@ Item {
   // Exposed items for PanelWindow masking
   property alias maskItem: notchContainer
   property alias backdropItem: backdropOverlay
+  property alias statusPanel: statusSubpanel
+  readonly property Item subpanelMaskItem: (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.openProgress > 0.01)) ? statusSubpanel.maskItem : null
 
   readonly property string iconFont: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
 
@@ -120,8 +193,20 @@ Item {
 
   property var btData: ({
     enabled: false,
-    connectedCount: 0
+    connectedCount: 0,
+    devices: []
   })
+
+  property var batteryData: ({
+    present: false,
+    capacity: 0,
+    charging: false,
+    plugged: false
+  })
+
+  property bool isRescanningWifi: false
+  property double lastBtScan: 0
+  property string debugTab: ""
 
   Process {
     id: statusProc
@@ -134,6 +219,8 @@ Item {
             var data = JSON.parse(str)
             if (data.wifi) root.wifiData = data.wifi
             if (data.bluetooth) root.btData = data.bluetooth
+            if (data.battery) root.batteryData = data.battery
+            root.isRescanningWifi = false
           } catch (e) {}
         }
       }
@@ -164,6 +251,92 @@ Item {
     runStatusAction(["--toggle-bt", root.btData.enabled ? "on" : "off"])
   }
 
+  function rescanWifi() {
+    root.isRescanningWifi = true
+    runStatusAction(["--rescan-wifi"])
+  }
+
+  function connectWifi(ssid) {
+    if (!ssid) return
+    runStatusAction(["--connect-wifi", ssid])
+  }
+
+  function connectBluetooth(mac) {
+    if (!mac) return
+    runStatusAction(["--connect-bt", mac])
+  }
+
+  function disconnectBluetooth(mac) {
+    if (!mac) return
+    runStatusAction(["--disconnect-bt", mac])
+  }
+
+  // -------------------------------------------------------------------------
+  // Status subpanel bloom (Wi-Fi / Bluetooth) — mirrors the top island
+  // -------------------------------------------------------------------------
+  function showStatusTab(tab) {
+    if (!statusSubpanel) return
+    statusSubpanel.openTab(tab)
+    root.refreshStatus()
+    // Bluetooth needs active discovery running to surface nearby devices that
+    // were never paired, so kick a scan whenever the panel is summoned. Rate
+    // limited because the hover sync re-enters this on every pointer move.
+    if (tab === "bluetooth" && !statusActionProc.running && root.btData.enabled
+        && (Date.now() - root.lastBtScan) > 15000) {
+      root.lastBtScan = Date.now()
+      root.runStatusAction(["--scan-bt"])
+    }
+  }
+
+  function togglePinStatusTab(tab) {
+    if (!statusSubpanel) return
+    if (statusSubpanel.isPinned && statusSubpanel.activeTab === tab) {
+      statusSubpanel.close()
+    } else {
+      statusSubpanel.openTab(tab)
+      statusSubpanel.isPinned = true
+    }
+  }
+
+  // Hit-test the pointer against the status buttons directly. The per-button
+  // MouseAreas only refresh `containsMouse` on real pointer motion, so a fast
+  // entry into the card can land on a button without ever activating it.
+  // Mapping the handler point keeps the bloom reliable for every entry path.
+  function syncStatusTabFromPointer() {
+    if (!cardProbe || !cardProbe.hovered) return
+    var sp = cardProbe.point.scenePosition
+    var wp = btnWifi.mapFromItem(null, sp.x, sp.y)
+    var bp = btnBluetooth.mapFromItem(null, sp.x, sp.y)
+
+    if (wp.x >= 0 && wp.x <= btnWifi.width && wp.y >= 0 && wp.y <= btnWifi.height) {
+      showStatusTab("wifi")
+      return
+    }
+    if (bp.x >= 0 && bp.x <= btnBluetooth.width && bp.y >= 0 && bp.y <= btnBluetooth.height) {
+      showStatusTab("bluetooth")
+      return
+    }
+
+    // Pointer is inside the card but no longer on the status buttons: let the
+    // bloom retract instead of lingering behind the cursor. The hot zone is
+    // padded towards the subpanel side so travelling from a button into the
+    // subpanel never trips the close.
+    var cp = statusColumn.mapFromItem(null, sp.x, sp.y)
+    var inHotZone = cp.x >= -48 && cp.x <= statusColumn.width + 6
+      && cp.y >= -10 && cp.y <= statusColumn.height + 10
+    if (!inHotZone) closeStatusTab()
+  }
+
+  function closeStatusTab() {
+    if (!statusSubpanel || statusSubpanel.isPinned) return
+    if (statusSubpanel.isOpen) statusSubpanel.isOpen = false
+  }
+
+  function debugStatus(tab) {
+    root.isPinned = false
+    root.showStatusTab(tab)
+  }
+
   // -------------------------------------------------------------------------
   // System State: Volume / Brightness / Power Profiles
   // -------------------------------------------------------------------------
@@ -178,7 +351,32 @@ Item {
     powerProc.running = true
   }
 
-  Component.onCompleted: root.refreshAll()
+  // Reduced motion: keep direct manipulation, drop the bounce. Hyprland owns
+  // the global animation switch, so read it on startup and whenever the menu
+  // is summoned (never on a timer — this panel stays cheap when idle).
+  property bool reduceMotion: false
+
+  Process {
+    id: motionPreferenceProc
+    command: ["hyprctl", "getoption", "animations:enabled"]
+    stdout: SplitParser {
+      onRead: function(line) {
+        // hyprctl prints "bool: true" / "bool: false" (older builds: "int: 1").
+        var str = String(line || "").toLowerCase()
+        if (str.indexOf("false") >= 0 || str.indexOf("int: 0") >= 0) root.reduceMotion = true
+        else if (str.indexOf("true") >= 0 || str.indexOf("int: 1") >= 0) root.reduceMotion = false
+      }
+    }
+  }
+
+  function refreshMotionPreference() {
+    if (!motionPreferenceProc.running) motionPreferenceProc.running = true
+  }
+
+  Component.onCompleted: {
+    root.refreshAll()
+    root.refreshMotionPreference()
+  }
 
   Timer {
     interval: 3000
@@ -192,10 +390,12 @@ Item {
     }
   }
 
-  onIsOpenChanged: {
+  onIsOpenEffectiveChanged: {
     if (root.isOpenEffective) {
       root.refreshAll()
       root.refreshStatus()
+    } else {
+      root.closeSubpanel()
     }
   }
 
@@ -297,6 +497,18 @@ Item {
     return "󰂯"
   }
 
+  function getBatteryIcon() {
+    if (!root.batteryData || !root.batteryData.present) return "󰂑"
+    var cap = root.batteryData.capacity || 0
+    if (root.batteryData.charging) return cap >= 95 ? "󰂅" : "󰂄"
+    if (cap >= 90) return "󰁹"
+    if (cap >= 70) return "󰂀"
+    if (cap >= 50) return "󰁿"
+    if (cap >= 30) return "󰁾"
+    if (cap >= 15) return "󰁻"
+    return "󰁺"
+  }
+
   // =========================================================================
   // Fixed Bottom-Right Corner Edge Trigger: stays pinned at corner to wake notch
   // =========================================================================
@@ -312,7 +524,10 @@ Item {
     }
   }
 
-  readonly property bool isCornerActive: cornerTriggerHover.hovered || (notchHover && notchHover.hovered) || root.isOpenEffective
+  readonly property bool isCornerActive: cornerTriggerHover.hovered
+    || (notchHover && notchHover.hovered)
+    || Boolean(statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
+    || root.isOpenEffective
 
   // Auto-retract inward into screen border when apps are opened;
   // Springs out immediately when cursor touches bottom-right corner or menu opens
@@ -346,24 +561,29 @@ Item {
     // Retracts down and right flush with the 12px screen frame
     readonly property real targetRetractY: root.shouldRetract ? -(root.collapsedHeight - root.borderThickness) : 0.0
     readonly property real targetRetractX: root.shouldRetract ? -(root.collapsedWidth - root.borderThickness) : 0.0
-    property real currentRetractY: targetRetractY
-    property real currentRetractX: targetRetractX
 
-    Behavior on currentRetractY {
-      NumberAnimation {
-        duration: root.shouldRetract ? 280 : 380
-        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
-        easing.overshoot: 1.08
-      }
+    // Retracting is a settle (critically damped); waking back out gets a little
+    // momentum. Both springs keep their velocity if a wake lands mid-retract.
+    FluidSpring {
+      id: retractYSpring
+      target: notchContainer.targetRetractY
+      response: root.shouldRetract ? 0.28 : 0.36
+      dampingFraction: root.shouldRetract ? 1.0 : 0.8
+      epsilon: 0.05
+      reduceMotion: root.reduceMotion
     }
 
-    Behavior on currentRetractX {
-      NumberAnimation {
-        duration: root.shouldRetract ? 280 : 380
-        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
-        easing.overshoot: 1.08
-      }
+    FluidSpring {
+      id: retractXSpring
+      target: notchContainer.targetRetractX
+      response: root.shouldRetract ? 0.28 : 0.36
+      dampingFraction: root.shouldRetract ? 1.0 : 0.8
+      epsilon: 0.05
+      reduceMotion: root.reduceMotion
     }
+
+    readonly property real currentRetractY: retractYSpring.value
+    readonly property real currentRetractX: retractXSpring.value
 
     anchors.bottomMargin: currentRetractY
     anchors.rightMargin: currentRetractX
@@ -378,29 +598,32 @@ Item {
       cursorShape: root.isOpenEffective ? Qt.ArrowCursor : Qt.PointingHandCursor
       onHoveredChanged: {
         if (hovered) {
+          hoverCloseTimer.stop()
           root.isHoverOpen = true
           root.refreshAll()
           root.refreshStatus()
         } else {
-          if (!root.isPinned && !root.isOpen) {
-            root.isHoverOpen = false
-          }
+          hoverCloseTimer.restart()
         }
       }
     }
 
-    // Tactile press feedback
+    // Tactile press feedback: appears on touch-down (0.18s, critically damped,
+    // no bounce) and pops back with a flickable release spring.
     property bool isGussetPressed: restingTapHandler.pressed
-    scale: (!root.isOpenEffective && isGussetPressed) ? 0.96 : 1.0
-    transformOrigin: Item.BottomRight
 
-    Behavior on scale {
-      NumberAnimation {
-        duration: notchContainer.isGussetPressed ? 120 : 280
-        easing.type: notchContainer.isGussetPressed ? Easing.OutQuad : Easing.OutBack
-        easing.overshoot: 1.15
-      }
+    FluidSpring {
+      id: gussetPressSpring
+      target: (!root.isOpenEffective && notchContainer.isGussetPressed) ? 0.96 : 1.0
+      response: notchContainer.isGussetPressed ? 0.18 : 0.30
+      dampingFraction: notchContainer.isGussetPressed ? 1.0 : 0.78
+      epsilon: 0.0004
+      reduceMotion: root.reduceMotion
+      value: 1.0
     }
+
+    scale: gussetPressSpring.value
+    transformOrigin: Item.BottomRight
 
     // -----------------------------------------------------------------------
     // Native Bottom-Right Geometry (Resting "C" Gusset)
@@ -602,7 +825,7 @@ Item {
       TapHandler {
         id: restingTapHandler
         onTapped: {
-          if (root.isPinned) root.close()
+          if (root.isOpenEffective) root.close()
           else root.open()
         }
       }
@@ -620,6 +843,12 @@ Item {
       scale: 0.92 + (0.08 * root.openProgress)
       transformOrigin: Item.BottomRight
 
+      HoverHandler {
+        id: cardProbe
+        onHoveredChanged: root.syncStatusTabFromPointer()
+        onPointChanged: root.syncStatusTabFromPointer()
+      }
+
       Column {
         id: controlsColumn
         anchors.bottom: parent.bottom
@@ -628,6 +857,7 @@ Item {
         anchors.rightMargin: root.borderThickness + 14
         spacing: 12
 
+
         // Top section: Wi-Fi/BT on LEFT + Horizontal Sliders on RIGHT
         Row {
           anchors.horizontalCenter: parent.horizontalCenter
@@ -635,6 +865,7 @@ Item {
 
           // LEFT: Wi-Fi (top) + Bluetooth (bottom) column
           Column {
+            id: statusColumn
             anchors.verticalCenter: parent.verticalCenter
             spacing: 12
 
@@ -648,19 +879,23 @@ Item {
               readonly property bool isActive: Boolean(root.wifiData && root.wifiData.enabled)
               readonly property bool isPressed: wifiArea.pressed
 
+              // Press lands on touch-down, hover is a slow idle lift.
+              FluidSpring {
+                id: wifiPressSpring
+                target: btnWifi.isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
+                response: btnWifi.isPressed ? 0.18 : 0.30
+                dampingFraction: btnWifi.isPressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
+              }
+
               color: isActive
                 ? frameConfig.powerButtonActiveBg
                 : (wifiArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
-              scale: isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
+              scale: wifiPressSpring.value
 
               Behavior on color { ColorAnimation { duration: 180 } }
-              Behavior on scale {
-                NumberAnimation {
-                  duration: btnWifi.isPressed ? 110 : 260
-                  easing.type: btnWifi.isPressed ? Easing.OutQuad : Easing.OutBack
-                  easing.overshoot: 1.15
-                }
-              }
 
               Text {
                 anchors.centerIn: parent
@@ -678,6 +913,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) root.showStatusTab("wifi")
                 onClicked: root.toggleWifi()
               }
             }
@@ -692,19 +928,22 @@ Item {
               readonly property bool isActive: Boolean(root.btData && root.btData.enabled)
               readonly property bool isPressed: btArea.pressed
 
+              FluidSpring {
+                id: btPressSpring
+                target: btnBluetooth.isPressed ? 0.90 : (btArea.containsMouse ? 1.08 : 1.0)
+                response: btnBluetooth.isPressed ? 0.18 : 0.30
+                dampingFraction: btnBluetooth.isPressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
+              }
+
               color: isActive
                 ? frameConfig.powerButtonActiveBg
                 : (btArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
-              scale: isPressed ? 0.90 : (btArea.containsMouse ? 1.08 : 1.0)
+              scale: btPressSpring.value
 
               Behavior on color { ColorAnimation { duration: 180 } }
-              Behavior on scale {
-                NumberAnimation {
-                  duration: btnBluetooth.isPressed ? 110 : 260
-                  easing.type: btnBluetooth.isPressed ? Easing.OutQuad : Easing.OutBack
-                  easing.overshoot: 1.15
-                }
-              }
 
               Text {
                 anchors.centerIn: parent
@@ -722,6 +961,7 @@ Item {
                 anchors.fill: parent
                 hoverEnabled: true
                 cursorShape: Qt.PointingHandCursor
+                onContainsMouseChanged: if (containsMouse) root.showStatusTab("bluetooth")
                 onClicked: root.toggleBluetooth()
               }
             }
@@ -737,13 +977,32 @@ Item {
               id: brightItem
               width: frameConfig.controlSliderWidth
               height: frameConfig.controlSliderHeight
-              scale: brightArea.pressed ? 0.98 : 1.0
 
-              Behavior on scale {
-                NumberAnimation {
-                  duration: brightArea.pressed ? 100 : 220
-                  easing.type: brightArea.pressed ? Easing.OutQuad : Easing.OutBack
-                }
+              // Press feedback: instant on touch-down, springs back on release.
+              FluidSpring {
+                id: brightPressSpring
+                target: brightArea.pressed ? 0.98 : 1.0
+                response: brightArea.pressed ? 0.18 : 0.30
+                dampingFraction: brightArea.pressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
+              }
+
+              scale: brightPressSpring.value
+
+              // Fill driver. While the finger is down this tracks 1:1 (no
+              // smoothing, no lag); any change that happens without a finger
+              // (media keys, system sync) glides in on a spring.
+              FluidSpring {
+                id: brightFillSpring
+                target: root.brightnessFraction
+                tracking: brightArea.pressed
+                response: 0.36
+                dampingFraction: 0.80
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: root.brightnessFraction
               }
 
               Rectangle {
@@ -757,14 +1016,9 @@ Item {
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                width: Math.max(0, parent.width * root.brightnessFraction)
+                width: Math.max(0, parent.width * brightFillSpring.value)
                 clip: true
-                visible: (root.brightnessFraction > 0.005) && (width > 1)
-
-                Behavior on width {
-                  enabled: !brightArea.pressed
-                  NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-                }
+                visible: brightFillSpring.value > 0.002 && width > 0.5
 
                 Rectangle {
                   anchors.left: parent.left
@@ -818,14 +1072,18 @@ Item {
               id: volItem
               width: frameConfig.controlSliderWidth
               height: frameConfig.controlSliderHeight
-              scale: volArea.pressed ? 0.98 : 1.0
 
-              Behavior on scale {
-                NumberAnimation {
-                  duration: volArea.pressed ? 100 : 220
-                  easing.type: volArea.pressed ? Easing.OutQuad : Easing.OutBack
-                }
+              FluidSpring {
+                id: volPressSpring
+                target: volArea.pressed ? 0.98 : 1.0
+                response: volArea.pressed ? 0.18 : 0.30
+                dampingFraction: volArea.pressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
               }
+
+              scale: volPressSpring.value
 
               Rectangle {
                 anchors.fill: parent
@@ -833,19 +1091,27 @@ Item {
                 color: frameConfig.sliderTrackColor
               }
 
+              // Fill driver: 1:1 under the finger, spring for every value the
+              // system pushes in (volume keys, pamixer sync).
+              FluidSpring {
+                id: volFillSpring
+                target: root.volumeFraction
+                tracking: volArea.pressed
+                response: 0.36
+                dampingFraction: 0.80
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: root.volumeFraction
+              }
+
               Item {
                 id: volFillContainer
                 anchors.left: parent.left
                 anchors.top: parent.top
                 anchors.bottom: parent.bottom
-                width: Math.max(0, parent.width * root.volumeFraction)
+                width: Math.max(0, parent.width * volFillSpring.value)
                 clip: true
-                visible: (root.volumeFraction > 0.005) && (width > 1)
-
-                Behavior on width {
-                  enabled: !volArea.pressed
-                  NumberAnimation { duration: 120; easing.type: Easing.OutCubic }
-                }
+                visible: volFillSpring.value > 0.002 && width > 0.5
 
                 Rectangle {
                   anchors.left: parent.left
@@ -910,19 +1176,22 @@ Item {
 
             readonly property bool isActive: root.activePowerProfile === "power-saver"
 
+            FluidSpring {
+              id: lpPressSpring
+              target: lpArea.pressed ? 0.90 : (lpArea.containsMouse ? 1.08 : 1.0)
+              response: lpArea.pressed ? 0.18 : 0.30
+              dampingFraction: lpArea.pressed ? 1.0 : 0.78
+              epsilon: 0.0004
+              reduceMotion: root.reduceMotion
+              value: 1.0
+            }
+
             color: isActive
               ? frameConfig.powerButtonActiveBg
               : (lpArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
-            scale: lpArea.pressed ? 0.90 : (lpArea.containsMouse ? 1.08 : 1.0)
+            scale: lpPressSpring.value
 
             Behavior on color { ColorAnimation { duration: 180 } }
-            Behavior on scale {
-              NumberAnimation {
-                duration: lpArea.pressed ? 110 : 260
-                easing.type: lpArea.pressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
-            }
 
             Text {
               anchors.centerIn: parent
@@ -953,19 +1222,22 @@ Item {
 
             readonly property bool isActive: root.activePowerProfile === "balanced"
 
+            FluidSpring {
+              id: balPressSpring
+              target: balArea.pressed ? 0.90 : (balArea.containsMouse ? 1.08 : 1.0)
+              response: balArea.pressed ? 0.18 : 0.30
+              dampingFraction: balArea.pressed ? 1.0 : 0.78
+              epsilon: 0.0004
+              reduceMotion: root.reduceMotion
+              value: 1.0
+            }
+
             color: isActive
               ? frameConfig.powerButtonActiveBg
               : (balArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
-            scale: balArea.pressed ? 0.90 : (balArea.containsMouse ? 1.08 : 1.0)
+            scale: balPressSpring.value
 
             Behavior on color { ColorAnimation { duration: 180 } }
-            Behavior on scale {
-              NumberAnimation {
-                duration: balArea.pressed ? 110 : 260
-                easing.type: balArea.pressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
-            }
 
             Text {
               anchors.centerIn: parent
@@ -996,19 +1268,22 @@ Item {
 
             readonly property bool isActive: root.activePowerProfile === "performance"
 
+            FluidSpring {
+              id: perfPressSpring
+              target: perfArea.pressed ? 0.90 : (perfArea.containsMouse ? 1.08 : 1.0)
+              response: perfArea.pressed ? 0.18 : 0.30
+              dampingFraction: perfArea.pressed ? 1.0 : 0.78
+              epsilon: 0.0004
+              reduceMotion: root.reduceMotion
+              value: 1.0
+            }
+
             color: isActive
               ? frameConfig.powerButtonActiveBg
               : (perfArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
-            scale: perfArea.pressed ? 0.90 : (perfArea.containsMouse ? 1.08 : 1.0)
+            scale: perfPressSpring.value
 
             Behavior on color { ColorAnimation { duration: 180 } }
-            Behavior on scale {
-              NumberAnimation {
-                duration: perfArea.pressed ? 110 : 260
-                easing.type: perfArea.pressed ? Easing.OutQuad : Easing.OutBack
-                easing.overshoot: 1.15
-              }
-            }
 
             Text {
               anchors.centerIn: parent
@@ -1030,7 +1305,85 @@ Item {
             }
           }
         }
+
+        // Row 5: Battery capsule (bottom-most row)
+        Row {
+          anchors.horizontalCenter: parent.horizontalCenter
+          spacing: 14
+
+          // Battery capsule (icon + charge percentage)
+          Rectangle {
+            id: batteryCapsule
+            width: frameConfig.controlBatteryRowWidth
+            height: frameConfig.controlButtonSize
+            radius: height / 2
+            color: frameConfig.sliderTrackColor
+
+            Row {
+              anchors.centerIn: parent
+              spacing: 8
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.getBatteryIcon()
+                font.family: root.iconFont
+                font.pixelSize: 20
+                color: root.batteryData.present && root.batteryData.charging
+                  ? frameConfig.powerButtonActiveIcon
+                  : frameConfig.powerButtonInactiveIcon
+                renderType: Text.NativeRendering
+              }
+
+              Text {
+                anchors.verticalCenter: parent.verticalCenter
+                visible: root.batteryData.present
+                text: root.batteryData.capacity + "%"
+                font.family: "Adwaita Sans, Inter, sans-serif"
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+                color: frameConfig.powerButtonInactiveIcon
+                renderType: Text.NativeRendering
+              }
+            }
+          }
+        }
       }
+    }
+  }
+
+  // =========================================================================
+  // Status Subpanel: blooms LEFTWARDS out of the control card (unibody, flush)
+  // =========================================================================
+  ControlCenterSubpanel {
+    id: statusSubpanel
+    frameConfig: root.frameConfig
+    notchColor: root.notchColor
+    borderThickness: root.borderThickness
+    fontFamily: root.fontFamily
+    anchors.right: notchContainer.left
+    // Overlap the card's own flare inset so the subpanel's contact edge lands
+    // exactly on the visible left edge of the open card (seamless unibody).
+    anchors.rightMargin: -frameConfig.controlExpandedFlareRadius
+    anchors.verticalCenter: notchContainer.verticalCenter
+
+    wifiData: root.wifiData
+    btData: root.btData
+    isRescanningWifi: root.isRescanningWifi
+    reduceMotion: root.reduceMotion
+
+    onToggleWifiRequested: root.toggleWifi()
+    onRescanWifiRequested: root.rescanWifi()
+    onConnectWifiRequested: function(ssid) { root.connectWifi(ssid) }
+    onToggleBluetoothRequested: root.toggleBluetooth()
+    onConnectBluetoothRequested: function(mac) { root.connectBluetooth(mac) }
+    onDisconnectBluetoothRequested: function(mac) { root.disconnectBluetooth(mac) }
+  }
+
+  // Re-arm the grace timer when the pointer leaves the subpanel
+  Connections {
+    target: statusSubpanel
+    function onIsHoveredChanged() {
+      if (!statusSubpanel.isHovered) hoverCloseTimer.restart()
     }
   }
 }

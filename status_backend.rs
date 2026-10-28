@@ -1,5 +1,7 @@
 use std::collections::HashSet;
 use std::env;
+use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 fn run_cmd(args: &[&str]) -> String {
@@ -207,6 +209,11 @@ fn get_bluetooth_status() -> BtStatus {
                     let mac = parts[1].trim().to_string();
                     let mac_upper = mac.to_uppercase();
                     let name = parts[2].trim().to_string();
+                    // Unnamed BLE beacons surface as their own MAC; skip the noise
+                    let mac_dashed = mac_upper.replace(':', "-");
+                    if name.is_empty() || name == mac_dashed || name == mac_upper {
+                        continue;
+                    }
                     if !seen_macs.contains(&mac_upper) {
                         seen_macs.insert(mac_upper.clone());
                         let conn = connected_macs.contains(&mac_upper);
@@ -263,6 +270,13 @@ struct DnsStatus {
     dot: bool,
 }
 
+struct BatteryStatus {
+    present: bool,
+    capacity: u32,
+    charging: bool,
+    plugged: bool,
+}
+
 fn get_dns_status(iface: &str) -> DnsStatus {
     let mut current_dns = String::new();
     let dns_out = run_cmd(&["resolvectl", "dns", iface]);
@@ -305,6 +319,54 @@ fn get_dns_status(iface: &str) -> DnsStatus {
         preset: preset.to_string(),
         dot: true,
     }
+}
+
+// ===========================================================================
+// Battery Status (native sysfs telemetry, no external binaries)
+// ===========================================================================
+fn get_battery_status() -> BatteryStatus {
+    let mut battery = BatteryStatus {
+        present: false,
+        capacity: 0,
+        charging: false,
+        plugged: false,
+    };
+
+    let base = Path::new("/sys/class/power_supply");
+    let entries = match fs::read_dir(base) {
+        Ok(e) => e,
+        Err(_) => return battery,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = entry.file_name().to_string_lossy().to_string();
+        let kind = fs::read_to_string(path.join("type")).unwrap_or_default();
+        let is_battery =
+            kind.trim().eq_ignore_ascii_case("battery") || name.to_uppercase().starts_with("BAT");
+
+        if !is_battery {
+            continue;
+        }
+
+        if let Ok(cap) = fs::read_to_string(path.join("capacity")) {
+            if let Ok(value) = cap.trim().parse::<u32>() {
+                battery.present = true;
+                battery.capacity = value.min(100);
+            }
+        }
+
+        let state = fs::read_to_string(path.join("status")).unwrap_or_default();
+        let state = state.trim();
+        battery.charging = state == "Charging" || state == "Full";
+        battery.plugged = battery.charging || state == "Not charging";
+
+        if battery.present {
+            break;
+        }
+    }
+
+    battery
 }
 
 fn main() {
@@ -364,6 +426,13 @@ fn main() {
                 }
                 return;
             }
+            "--scan-bt" => {
+                // Active discovery so nearby, not-yet-paired devices surface too.
+                let _ = Command::new("bluetoothctl")
+                    .args(["--timeout", "6", "scan", "on"])
+                    .status();
+                return;
+            }
             "--set-dns" => {
                 if args.len() > 2 {
                     let preset = &args[2];
@@ -398,6 +467,7 @@ fn main() {
     let wifi = get_wifi_status(&iface);
     let bt = get_bluetooth_status();
     let dns = get_dns_status(&iface);
+    let battery = get_battery_status();
 
     let mut json = String::with_capacity(2048);
     json.push('{');
@@ -445,6 +515,14 @@ fn main() {
     json.push_str(&format!("\"current\":\"{}\",", json_escape(&dns.current)));
     json.push_str(&format!("\"preset\":\"{}\",", json_escape(&dns.preset)));
     json.push_str(&format!("\"dot\":{}", dns.dot));
+    json.push_str("},");
+
+    // Battery
+    json.push_str("\"battery\":{");
+    json.push_str(&format!("\"present\":{},", battery.present));
+    json.push_str(&format!("\"capacity\":{},", battery.capacity));
+    json.push_str(&format!("\"charging\":{},", battery.charging));
+    json.push_str(&format!("\"plugged\":{}", battery.plugged));
     json.push_str("}}");
 
     println!("{}", json);

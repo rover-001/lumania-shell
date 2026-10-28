@@ -104,7 +104,7 @@ QtObject {
   // Finger height: how far the gusset climbs up the right border
   property real controlRightTabHeight: 100
   // Panel height when the control menu is open
-  property real controlExpandedHeight: 236
+  property real controlExpandedHeight: 280
 
   // ---- CURVES / RADII -----------------------------------------------------
   property real controlTabCapRadius: 5
@@ -125,6 +125,14 @@ QtObject {
   property real controlPowerButtonSize: 54         // Power profile circles (same size as bt and wifi)
   property real controlSliderWidth: 124            // Horizontal slider width
   property real controlSliderHeight: 54           // Horizontal slider height (matches 54px buttons)
+  property real controlBatteryRowWidth: 124        // Battery capsule width (aligns with slider column)
+  property real controlBatteryHeight: 54           // Battery capsule height (matches status circles)
+
+  // ---- STATUS SUBPANEL (blooms leftwards out of the open control card) -----
+  property real controlSubpanelWidth: 300          // Subpanel width (Wi-Fi / Bluetooth / DNS views)
+  property real controlSubpanelHeight: 236         // Subpanel height
+  property real controlSubpanelFlareRadius: 20     // Concave flare melting into the control card edge
+  property real controlSubpanelCornerRadius: 22    // Free-end rounded corners
 
   // =========================================================================
   // TOP-LEFT WORKSPACE NOTCH CONSTANTS (VERTICAL 1-COLUMN ON LEFT BORDER)
