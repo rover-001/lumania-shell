@@ -122,6 +122,27 @@ Item {
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
     hasOpenApps: root.hasOpenApps
+    shell: root.shell
+    barWidgetRegistry: root.barWidgetRegistry
+    pluginRegistry: root.pluginRegistry
+    barConfig: root.barConfig
+  }
+
+  // 1b. Top-Right Tray and Omarchy Plugin Notch Window (Twin Dynamic Island)
+  TopRightWindow {
+    frameConfig: frameConfig
+    borderThickness: root.borderThickness
+    notchColor: root.islandColor
+    textColor: root.islandTextColor
+    mutedColor: root.islandMutedColor
+    fontFamily: root.fontFamily
+    barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
+    shell: root.shell
+    barWidgetRegistry: root.barWidgetRegistry
+    pluginRegistry: root.pluginRegistry
+    barConfig: root.barConfig
   }
 
   // 2. Screen Frame Borders (Bottom, Left, Right bezel windows and dock margins)

@@ -18,6 +18,12 @@ Item {
   property bool hasOpenApps: false
   property int islandWindowHeight: 380
 
+  // Host & plugin registry references
+  property var shell: null
+  property var barWidgetRegistry: null
+  property var pluginRegistry: null
+  property var barConfig: ({})
+
   Variants {
     model: Quickshell.screens
 

@@ -94,11 +94,28 @@ Item {
   // Dimensions
   implicitWidth: frameConfig.controlSubpanelWidth
 
+  property var cachedWifiNetworks: []
+  property var cachedBtDevices: []
+
+  onWifiDataChanged: {
+    if (wifiData && wifiData.networks && wifiData.networks.length > 0) {
+      cachedWifiNetworks = wifiData.networks
+    }
+  }
+
+  onBtDataChanged: {
+    if (btData && btData.devices && btData.devices.length > 0) {
+      cachedBtDevices = btData.devices
+    }
+  }
+
   // Height follows the row count so the panel never carries empty space
   readonly property int rowPitch: 30
   readonly property real verticalPadding: (frameConfig.controlSubpanelFlareRadius * 2) + 16
   readonly property var wifiNetworks: {
-    var nets = root.wifiData.networks || []
+    var nets = (root.wifiData.networks && root.wifiData.networks.length > 0)
+      ? root.wifiData.networks
+      : root.cachedWifiNetworks
     var filtered = []
     for (var i = 0; i < nets.length; i++) {
       var n = nets[i]
@@ -108,9 +125,14 @@ Item {
     filtered.sort(function (a, b) { return (b.active ? 1 : 0) - (a.active ? 1 : 0) })
     return filtered
   }
+  readonly property var btDevices: {
+    return (root.btData.devices && root.btData.devices.length > 0)
+      ? root.btData.devices
+      : root.cachedBtDevices
+  }
   readonly property int activeRowCount: root.activeTab === "wifi"
     ? root.wifiNetworks.length
-    : (root.btData.devices || []).length
+    : root.btDevices.length
 
   // Height follows the row count so the panel never carries empty space.
   // Critically damped: the mask window must never overshoot past the bounds.
@@ -390,7 +412,7 @@ Item {
           spacing: 2
           boundsBehavior: Flickable.StopAtBounds
           visible: root.btData.enabled
-          model: root.btData.devices || []
+          model: root.btDevices
 
           delegate: Rectangle {
             id: btItem

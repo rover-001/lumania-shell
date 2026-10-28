@@ -79,6 +79,24 @@ QtObject {
   property int islandHoverHeightDeltaMedia: 24      // Height expansion when media playing (fits media controls)
 
   // =========================================================================
+  // TOP-RIGHT TRAY & PLUGIN NOTCH CONSTANTS (DYNAMIC ISLAND TWIN)
+  // =========================================================================
+  property real trayNotchRightMargin: 26            // Margin left of top-right corner fillet
+  property real trayNotchBaseHeight: 37             // Resting height (borderThickness + 32)
+  property real trayNotchHoverHeightDelta: 5        // Subtle height expansion on hover (+5px down to 42px)
+  property real trayNotchTopCurveRadius: 10         // Concave shoulder flare radius
+  property real trayNotchExpandedTopCurveRadius: 12 // Concave shoulder flare radius when hovered
+  property real trayNotchBottomCornerRadius: 15     // Convex bottom corner radius
+  property real trayNotchExpandedBottomCornerRadius: 18 // Bottom corner radius when hovered
+  property real trayNotchItemSize: 28               // Square squircle slot for tray and plugin buttons
+  property real trayNotchItemRadius: 8              // Squircle radius for items
+  property real trayNotchItemSpacing: 6             // Spacing between icons
+  property real trayNotchSidePadding: 12            // Horizontal padding inside the notch
+  property int trayNotchOpenDuration: 340           // ms, iOS energetic spring open
+  property int trayNotchCloseDuration: 280          // ms, critically damped settle
+  property real trayNotchOpenOvershoot: 1.08        // OutBack spring overshoot
+
+  // =========================================================================
   // BOTTOM-RIGHT CONTROL CENTER — EDIT SHAPE HERE
   // =========================================================================
   // Mirrors the bottom-left search gusset: a low lip along the BOTTOM border
@@ -96,7 +114,7 @@ QtObject {
   // Finger width: the part merged into the right border
   property real controlRightTabWidth: 10
   // Panel width when the control menu is open
-  property real controlExpandedWidth: 248
+  property real controlExpandedWidth: 312
 
   // ---- HEIGHT -------------------------------------------------------------
   // Lip rise above the bottom border
@@ -104,7 +122,7 @@ QtObject {
   // Finger height: how far the gusset climbs up the right border
   property real controlRightTabHeight: 100
   // Panel height when the control menu is open
-  property real controlExpandedHeight: 280
+  property real controlExpandedHeight: 252
 
   // ---- CURVES / RADII -----------------------------------------------------
   property real controlTabCapRadius: 5
@@ -123,12 +141,12 @@ QtObject {
   property real controlHeightPulse: 6              // vertical stretch mid-open (px)
 
   // ---- CONTENT ------------------------------------------------------------
-  property real controlButtonSize: 54              // Wi-Fi / Bluetooth circles
-  property real controlPowerButtonSize: 54         // Power profile circles (same size as bt and wifi)
-  property real controlSliderWidth: 124            // Horizontal slider width
-  property real controlSliderHeight: 54           // Horizontal slider height (matches 54px buttons)
-  property real controlBatteryRowWidth: 124        // Battery capsule width (aligns with slider column)
-  property real controlBatteryHeight: 54           // Battery capsule height (matches status circles)
+  property real controlButtonSize: 46              // Quick-toggle circles (Wi-Fi, BT, Night Light, Focus, Record)
+  property real controlPowerButtonSize: 46         // Power profile circles (Eco, Balanced, Performance)
+  property real controlSliderWidth: 160            // Horizontal sliders (Brightness, Volume)
+  property real controlSliderHeight: 46           // Slider height matches button size
+  property real controlBatteryRowWidth: 272        // Battery capsule width (Row 4)
+  property real controlBatteryHeight: 42           // Battery capsule height
 
   // ---- STATUS SUBPANEL (blooms leftwards out of the open control card) -----
   property real controlSubpanelWidth: 300          // Subpanel width (Wi-Fi / Bluetooth / DNS views)

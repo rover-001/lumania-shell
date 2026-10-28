@@ -325,8 +325,8 @@ Item {
     // padded towards the subpanel side so travelling from a button into the
     // subpanel never trips the close.
     var cp = statusColumn.mapFromItem(null, sp.x, sp.y)
-    var inHotZone = cp.x >= -48 && cp.x <= statusColumn.width + 6
-      && cp.y >= -10 && cp.y <= statusColumn.height + 10
+    var inHotZone = cp.x >= -48 && cp.x <= (statusColumn.width + 12)
+      && cp.y >= -12 && cp.y <= (statusColumn.height + 12)
     if (!inHotZone) closeStatusTab()
   }
 
@@ -348,10 +348,98 @@ Item {
   property string activePowerProfile: "balanced"
   property bool isDraggingSlider: false
 
+  // -------------------------------------------------------------------------
+  // Night Light / Focus (DND) / Screen Recording Toggles
+  // -------------------------------------------------------------------------
+  property bool nightLightActive: false
+  property bool focusActive: false
+  property bool recordingActive: false
+
+  Process {
+    id: nightLightProbe
+    command: ["sh", "-c", "omarchy-shell nightlight status 2>/dev/null | jq -r '.enabled // false' 2>/dev/null || echo false"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var str = String(text || "").trim()
+        root.nightLightActive = (str === "true")
+      }
+    }
+  }
+
+  Process {
+    id: nightLightToggleProc
+    command: ["sh", "-c", "omarchy-shell nightlight toggle || omarchy-toggle-nightlight 2>/dev/null"]
+    onExited: root.refreshNightLight()
+  }
+
+  function refreshNightLight() {
+    if (!nightLightProbe.running) nightLightProbe.running = true
+  }
+
+  function toggleNightLight() {
+    root.nightLightActive = !root.nightLightActive
+    nightLightToggleProc.running = true
+  }
+
+  Process {
+    id: focusProbe
+    command: ["sh", "-c", "omarchy-shell notifications dndState 2>/dev/null || echo off"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var str = String(text || "").trim()
+        root.focusActive = (str === "on")
+      }
+    }
+  }
+
+  Process {
+    id: focusToggleProc
+    command: ["sh", "-c", "omarchy-shell notifications toggleDnd 2>/dev/null"]
+    onExited: root.refreshFocus()
+  }
+
+  function refreshFocus() {
+    if (!focusProbe.running) focusProbe.running = true
+  }
+
+  function toggleFocus() {
+    root.focusActive = !root.focusActive
+    focusToggleProc.running = true
+  }
+
+  Process {
+    id: recordProbe
+    command: ["sh", "-c", "pgrep -f '^gpu-screen-recorder' >/dev/null && echo 1 || echo 0"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var str = String(text || "").trim()
+        root.recordingActive = (str === "1")
+      }
+    }
+  }
+
+  Process {
+    id: recordToggleProc
+    command: ["sh", "-c", "if pgrep -f '^gpu-screen-recorder' >/dev/null; then omarchy-capture-screenrecording --stop-recording; else omarchy-capture-screenrecording; fi"]
+    onExited: root.refreshRecord()
+  }
+
+  function refreshRecord() {
+    if (!recordProbe.running) recordProbe.running = true
+  }
+
+  function toggleRecord() {
+    root.recordingActive = !root.recordingActive
+    recordToggleProc.running = true
+  }
+
   function refreshAll() {
     volProc.running = true
     brightProc.running = true
     powerProc.running = true
+    root.refreshNightLight()
+    root.refreshFocus()
+    root.refreshRecord()
   }
 
   // Reduced motion: keep direct manipulation, drop the bounce. Hyprland owns
@@ -513,44 +601,6 @@ Item {
   }
 
   // =========================================================================
-  // Bottom-Right Wake Zone: a shallow strip along the border that keeps the
-  // notch reachable while the gusset is retracted into the frame. Mirrors the
-  // wallpaper / search notches: touching the strip springs the gusset back out
-  // and blooms the menu, so the pointer never has to find the ~12px sliver that
-  // is all that stays on screen while retracted. Exposed as `wakeItem` because
-  // the host window must add it to the input mask — an unmasked item receives
-  // no pointer events at all.
-  // =========================================================================
-  readonly property bool wakeZoneActive: root.shouldRetract
-
-  Item {
-    id: cornerTriggerItem
-    anchors.bottom: parent.bottom
-    anchors.right: parent.right
-    width: root.wakeZoneActive ? Math.max(180, root.collapsedWidth) : 0
-    height: root.wakeZoneActive ? root.borderThickness + 24 : 0
-
-    HoverHandler {
-      id: cornerTriggerHover
-      cursorShape: Qt.PointingHandCursor
-      onHoveredChanged: {
-        if (hovered) {
-          root.open()
-        } else {
-          var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
-          if (!notchHover.hovered && !subpanelHovered && !root.isPinned) {
-            root.close()
-          }
-        }
-      }
-    }
-  }
-
-  // Auto-retract inward into screen border when apps are opened;
-  // Retracts with the exact same curve and timing as the bottom search notch
-  readonly property bool shouldRetract: root.hasOpenApps && !root.isOpenEffective && !(statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
-
-  // =========================================================================
   // Full-Screen Click-Away Catcher (no backdrop dimming)
   // =========================================================================
   Item {
@@ -573,36 +623,51 @@ Item {
     id: notchContainer
     anchors.bottom: parent.bottom
     anchors.right: parent.right
+    anchors.rightMargin: 0
 
-    // iOS Fluid Retract Offsets:
-    // Retracts down and right flush with the screen frame, identical to bottom search notch
-    readonly property real targetRetractY: root.shouldRetract ? -(root.collapsedHeight - root.borderThickness) : 0.0
-    readonly property real targetRetractX: root.shouldRetract ? -(root.collapsedWidth - root.borderThickness) : 0.0
+    // Auto-retract inward into screen border when apps are opened;
+    // Retracts down flush into screen border with the exact same curve and timing as the bottom search notch
+    readonly property bool shouldRetract: root.hasOpenApps && !root.isOpenEffective && !(statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
+    readonly property real targetRetractOffset: shouldRetract ? -(root.collapsedHeight - root.borderThickness) : 0.0
+    property real currentRetractOffset: targetRetractOffset
 
-    property real currentRetractY: targetRetractY
-    property real currentRetractX: targetRetractX
-
-    Behavior on currentRetractY {
+    Behavior on currentRetractOffset {
       NumberAnimation {
-        duration: root.shouldRetract ? 280 : 380
-        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
+        duration: notchContainer.shouldRetract ? 280 : 380
+        easing.type: notchContainer.shouldRetract ? Easing.OutCubic : Easing.OutBack
         easing.overshoot: 1.08
       }
     }
 
-    Behavior on currentRetractX {
-      NumberAnimation {
-        duration: root.shouldRetract ? 280 : 380
-        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
-        easing.overshoot: 1.08
-      }
-    }
-
-    anchors.bottomMargin: currentRetractY
-    anchors.rightMargin: currentRetractX
+    anchors.bottomMargin: currentRetractOffset
 
     width: root.currentWidth
     height: root.currentHeight
+
+    // Bottom-Right Edge Trigger: wakes retracted notch when mouse touches corner (mirrors search notch)
+    Item {
+      id: cornerTriggerItem
+      anchors.bottom: parent.bottom
+      anchors.right: parent.right
+      anchors.bottomMargin: -notchContainer.currentRetractOffset
+      width: Math.max(64, root.collapsedWidth)
+      height: root.borderThickness + 14
+
+      HoverHandler {
+        id: cornerTriggerHover
+        cursorShape: (!root.isOpenEffective) ? Qt.PointingHandCursor : Qt.ArrowCursor
+        onHoveredChanged: {
+          if (hovered) {
+            root.open()
+          } else {
+            var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+            if (!notchHover.hovered && !subpanelHovered && !root.isPinned) {
+              root.close()
+            }
+          }
+        }
+      }
+    }
 
     property color activeColor: root.notchColor
 
@@ -875,25 +940,27 @@ Item {
 
       Column {
         id: controlsColumn
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: root.borderThickness + 14
-        anchors.right: parent.right
-        anchors.rightMargin: root.borderThickness + 14
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: root.borderThickness / 2
+        anchors.horizontalCenter: parent.horizontalCenter
         spacing: 12
 
-
-        // Top section: Wi-Fi/BT on LEFT + Horizontal Sliders on RIGHT
+        // Top Section: 2 Rows x 3 Columns (Row 1 & Row 2)
+        // Col 1: Wi-Fi & Bluetooth (46px)
+        // Col 2: Night Light & Focus (46px)
+        // Col 3: Brightness & Volume Sliders (160px)
+        // Total width: 46 + 10 + 46 + 10 + 160 = 272px
         Row {
+          id: topControlsRow
           anchors.horizontalCenter: parent.horizontalCenter
-          spacing: 14
+          spacing: 10
 
-          // LEFT: Wi-Fi (top) + Bluetooth (bottom) column
+          // Column 1: Wi-Fi (top) & Bluetooth (bottom)
           Column {
             id: statusColumn
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
+            spacing: 10
 
-            // Wi-Fi toggle
+            // 1. Wi-Fi toggle
             Rectangle {
               id: btnWifi
               width: frameConfig.controlButtonSize
@@ -903,7 +970,6 @@ Item {
               readonly property bool isActive: Boolean(root.wifiData && root.wifiData.enabled)
               readonly property bool isPressed: wifiArea.pressed
 
-              // Press lands on touch-down, hover is a slow idle lift.
               FluidSpring {
                 id: wifiPressSpring
                 target: btnWifi.isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
@@ -942,7 +1008,7 @@ Item {
               }
             }
 
-            // Bluetooth toggle
+            // 2. Bluetooth toggle
             Rectangle {
               id: btnBluetooth
               width: frameConfig.controlButtonSize
@@ -991,18 +1057,117 @@ Item {
             }
           }
 
-          // RIGHT: Horizontal Brightness (top) + Volume (bottom) column
+          // Column 2: Night Light (top) & Focus (bottom)
           Column {
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 12
+            id: quickColumn
+            spacing: 10
 
-            // Horizontal Brightness Slider (fills from LEFT to RIGHT)
+            // 3. Night Light toggle
+            Rectangle {
+              id: btnNightLight
+              width: frameConfig.controlButtonSize
+              height: frameConfig.controlButtonSize
+              radius: width / 2
+
+              readonly property bool isActive: root.nightLightActive
+              readonly property bool isPressed: nlArea.pressed
+
+              FluidSpring {
+                id: nlPressSpring
+                target: btnNightLight.isPressed ? 0.90 : (nlArea.containsMouse ? 1.08 : 1.0)
+                response: btnNightLight.isPressed ? 0.18 : 0.30
+                dampingFraction: btnNightLight.isPressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
+              }
+
+              color: isActive
+                ? frameConfig.powerButtonActiveBg
+                : (nlArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
+              scale: nlPressSpring.value
+
+              Behavior on color { ColorAnimation { duration: 180 } }
+
+              Text {
+                anchors.centerIn: parent
+                text: "󰔎"
+                font.family: root.iconFont
+                font.pixelSize: 20
+                color: btnNightLight.isActive
+                  ? frameConfig.powerButtonActiveIcon
+                  : frameConfig.powerButtonInactiveIcon
+                renderType: Text.NativeRendering
+              }
+
+              MouseArea {
+                id: nlArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleNightLight()
+              }
+            }
+
+            // 4. Focus (Do Not Disturb) toggle
+            Rectangle {
+              id: btnFocus
+              width: frameConfig.controlButtonSize
+              height: frameConfig.controlButtonSize
+              radius: width / 2
+
+              readonly property bool isActive: root.focusActive
+              readonly property bool isPressed: focusArea.pressed
+
+              FluidSpring {
+                id: focusPressSpring
+                target: btnFocus.isPressed ? 0.90 : (focusArea.containsMouse ? 1.08 : 1.0)
+                response: btnFocus.isPressed ? 0.18 : 0.30
+                dampingFraction: btnFocus.isPressed ? 1.0 : 0.78
+                epsilon: 0.0004
+                reduceMotion: root.reduceMotion
+                value: 1.0
+              }
+
+              color: isActive
+                ? frameConfig.powerButtonActiveBg
+                : (focusArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
+              scale: focusPressSpring.value
+
+              Behavior on color { ColorAnimation { duration: 180 } }
+
+              Text {
+                anchors.centerIn: parent
+                text: btnFocus.isActive ? "󰂛" : "󰂚"
+                font.family: root.iconFont
+                font.pixelSize: 20
+                color: btnFocus.isActive
+                  ? frameConfig.powerButtonActiveIcon
+                  : frameConfig.powerButtonInactiveIcon
+                renderType: Text.NativeRendering
+              }
+
+              MouseArea {
+                id: focusArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.toggleFocus()
+              }
+            }
+          }
+
+          // Column 3: Brightness (top) & Volume (bottom) Sliders
+          Column {
+            id: sliderColumn
+            spacing: 10
+
+            // Horizontal Brightness Slider
             Item {
               id: brightItem
               width: frameConfig.controlSliderWidth
               height: frameConfig.controlSliderHeight
 
-              // Press feedback: instant on touch-down, springs back on release.
               FluidSpring {
                 id: brightPressSpring
                 target: brightArea.pressed ? 0.98 : 1.0
@@ -1015,9 +1180,6 @@ Item {
 
               scale: brightPressSpring.value
 
-              // Fill driver. While the finger is down this tracks 1:1 (no
-              // smoothing, no lag); any change that happens without a finger
-              // (media keys, system sync) glides in on a spring.
               FluidSpring {
                 id: brightFillSpring
                 target: root.brightnessFraction
@@ -1091,7 +1253,7 @@ Item {
               }
             }
 
-            // Horizontal Volume Slider (fills from LEFT to RIGHT)
+            // Horizontal Volume Slider
             Item {
               id: volItem
               width: frameConfig.controlSliderWidth
@@ -1109,14 +1271,6 @@ Item {
 
               scale: volPressSpring.value
 
-              Rectangle {
-                anchors.fill: parent
-                radius: height / 2
-                color: frameConfig.sliderTrackColor
-              }
-
-              // Fill driver: 1:1 under the finger, spring for every value the
-              // system pushes in (volume keys, pamixer sync).
               FluidSpring {
                 id: volFillSpring
                 target: root.volumeFraction
@@ -1126,6 +1280,12 @@ Item {
                 epsilon: 0.0004
                 reduceMotion: root.reduceMotion
                 value: root.volumeFraction
+              }
+
+              Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: frameConfig.sliderTrackColor
               }
 
               Item {
@@ -1186,12 +1346,61 @@ Item {
           }
         }
 
-        // Row 4: 3 Power Profile Buttons
+        // Row 3: Action & Power Profiles Row (Flush 272px wide)
+        // Record on left, Power Profiles (Eco, Balanced, Performance) grouped on right
         Row {
+          id: rowActionAndPower
           anchors.horizontalCenter: parent.horizontalCenter
-          spacing: 14
+          spacing: Math.round((272 - (frameConfig.controlButtonSize * 4)) / 3)
 
-          // Low power
+          // 5. Screen Record toggle
+          Rectangle {
+            id: btnRecord
+            width: frameConfig.controlButtonSize
+            height: frameConfig.controlButtonSize
+            radius: width / 2
+
+            readonly property bool isActive: root.recordingActive
+            readonly property bool isPressed: recordArea.pressed
+
+            FluidSpring {
+              id: recordPressSpring
+              target: btnRecord.isPressed ? 0.90 : (recordArea.containsMouse ? 1.08 : 1.0)
+              response: btnRecord.isPressed ? 0.18 : 0.30
+              dampingFraction: btnRecord.isPressed ? 1.0 : 0.78
+              epsilon: 0.0004
+              reduceMotion: root.reduceMotion
+              value: 1.0
+            }
+
+            color: isActive
+              ? Qt.rgba(1.0, 0.25, 0.25, 0.85)
+              : (recordArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
+            scale: recordPressSpring.value
+
+            Behavior on color { ColorAnimation { duration: 180 } }
+
+            Text {
+              anchors.centerIn: parent
+              text: "󰻂"
+              font.family: root.iconFont
+              font.pixelSize: 20
+              color: btnRecord.isActive
+                ? "#ffffff"
+                : frameConfig.powerButtonInactiveIcon
+              renderType: Text.NativeRendering
+            }
+
+            MouseArea {
+              id: recordArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.toggleRecord()
+            }
+          }
+
+          // Low power (Eco)
           Rectangle {
             id: btnLowPower
             width: frameConfig.controlPowerButtonSize
@@ -1330,44 +1539,59 @@ Item {
           }
         }
 
-        // Row 5: Battery capsule (bottom-most row)
-        Row {
+        // Row 4: Battery Capsule (Flush 272px wide)
+        Rectangle {
+          id: batteryCapsule
           anchors.horizontalCenter: parent.horizontalCenter
-          spacing: 14
+          width: frameConfig.controlBatteryRowWidth
+          height: frameConfig.controlBatteryHeight
+          radius: height / 2
+          color: frameConfig.sliderTrackColor
 
-          // Battery capsule (icon + charge percentage)
-          Rectangle {
-            id: batteryCapsule
-            width: frameConfig.controlBatteryRowWidth
-            height: frameConfig.controlButtonSize
-            radius: height / 2
-            color: frameConfig.sliderTrackColor
+          Row {
+            anchors.centerIn: parent
+            spacing: 8
 
-            Row {
-              anchors.centerIn: parent
-              spacing: 8
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              text: root.getBatteryIcon()
+              font.family: root.iconFont
+              font.pixelSize: 18
+              color: root.batteryData.present && root.batteryData.charging
+                ? frameConfig.powerButtonActiveIcon
+                : frameConfig.powerButtonInactiveIcon
+              renderType: Text.NativeRendering
+            }
 
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                text: root.getBatteryIcon()
-                font.family: root.iconFont
-                font.pixelSize: 20
-                color: root.batteryData.present && root.batteryData.charging
-                  ? frameConfig.powerButtonActiveIcon
-                  : frameConfig.powerButtonInactiveIcon
-                renderType: Text.NativeRendering
-              }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.batteryData.present
+              text: root.batteryData.capacity + "%"
+              font.family: "Adwaita Sans, Inter, sans-serif"
+              font.pixelSize: 13
+              font.weight: Font.DemiBold
+              color: frameConfig.powerButtonInactiveIcon
+              renderType: Text.NativeRendering
+            }
 
-              Text {
-                anchors.verticalCenter: parent.verticalCenter
-                visible: root.batteryData.present
-                text: root.batteryData.capacity + "%"
-                font.family: "Adwaita Sans, Inter, sans-serif"
-                font.pixelSize: 13
-                font.weight: Font.DemiBold
-                color: frameConfig.powerButtonInactiveIcon
-                renderType: Text.NativeRendering
-              }
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.batteryData.present && (root.batteryData.charging || Boolean(root.batteryData.timeRemaining))
+              text: "•"
+              font.family: "Adwaita Sans, Inter, sans-serif"
+              font.pixelSize: 13
+              color: Qt.rgba(1, 1, 1, 0.40)
+              renderType: Text.NativeRendering
+            }
+
+            Text {
+              anchors.verticalCenter: parent.verticalCenter
+              visible: root.batteryData.present && (root.batteryData.charging || Boolean(root.batteryData.timeRemaining))
+              text: root.batteryData.charging ? "Charging" : (root.batteryData.timeRemaining || "")
+              font.family: "Adwaita Sans, Inter, sans-serif"
+              font.pixelSize: 12
+              color: Qt.rgba(1, 1, 1, 0.60)
+              renderType: Text.NativeRendering
             }
           }
         }
@@ -1388,7 +1612,8 @@ Item {
     // Overlap the card's own flare inset so the subpanel's contact edge lands
     // exactly on the visible left edge of the open card (seamless unibody).
     anchors.rightMargin: -frameConfig.controlExpandedFlareRadius
-    anchors.verticalCenter: notchContainer.verticalCenter
+    anchors.top: notchContainer.top
+    anchors.topMargin: root.borderThickness + 10
 
     wifiData: root.wifiData
     btData: root.btData

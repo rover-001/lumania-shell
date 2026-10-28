@@ -72,7 +72,7 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
 
     let out = run_cmd(&[
         "nmcli", "-t", "-f", "in-use,ssid,signal,security",
-        "dev", "wifi", "list", "--rescan", "no"
+        "dev", "wifi", "list", "--rescan", "auto"
     ]);
 
     let mut networks: Vec<WifiNetwork> = Vec::new();
@@ -429,8 +429,8 @@ fn main() {
             "--scan-bt" => {
                 // Active discovery so nearby, not-yet-paired devices surface too.
                 let _ = Command::new("bluetoothctl")
-                    .args(["--timeout", "6", "scan", "on"])
-                    .status();
+                    .args(["--timeout", "4", "scan", "on"])
+                    .spawn();
                 return;
             }
             "--set-dns" => {
