@@ -160,17 +160,23 @@ Item {
     // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
     readonly property bool shouldRetract: root.hasOpenApps && !isPointerOver && islandContainer.hoverProgress < 0.05
     readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
-    property real currentRetractY: targetRetractY
 
-    Behavior on currentRetractY {
-      NumberAnimation {
-        duration: islandContainer.shouldRetract ? 280 : 380
-        easing.type: islandContainer.shouldRetract ? Easing.OutCubic : Easing.OutBack
-        easing.overshoot: 1.08
-      }
+    // Retract offset rides the shared FluidSpring driver: critically damped going
+    // in (a settle), a touch of momentum coming back out, and retargeting mid
+    // flight keeps velocity so a wake never restarts the motion.
+    FluidSpring {
+      id: retractSpring
+      target: islandContainer.targetRetractY
+      response: islandContainer.shouldRetract ? 0.28 : 0.36
+      dampingFraction: islandContainer.shouldRetract ? 1.0 : 0.8
+      epsilon: 0.05
     }
 
-    y: currentRetractY
+    readonly property real currentRetractY: retractSpring.value
+
+    // topMargin, not y: anchors.top owns y, so a y binding is overwritten by the
+    // anchor layout and the notch would stay parked on the top edge forever.
+    anchors.topMargin: currentRetractY
 
     // iOS Fluid Spring Behavior for hover
     // Expanding: snappy energetic spring (400ms, OutBack overshoot 1.08)
