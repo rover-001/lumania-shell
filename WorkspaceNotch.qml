@@ -21,8 +21,21 @@ Item {
   // Downwise 1-Column Notch Geometry (anchored on LEFT border in top-left, a little lower)
   readonly property real topMargin: frameConfig ? frameConfig.workspaceTopMargin : 68
   readonly property int workspaceCount: getWorkspacesList().length
-  readonly property real targetWidth: frameConfig ? frameConfig.workspaceWidth : 54
-  readonly property real targetHeight: frameConfig ? frameConfig.workspaceHeight : Math.max(216, workspaceCount * 38 + 24)
+  readonly property real targetWidth: frameConfig ? frameConfig.workspaceWidth : 61
+  // Horizontal breathing room kept on both sides of the workspace pills
+  readonly property real sidePadding: frameConfig ? frameConfig.workspaceSidePadding : 12
+
+  // Rail item geometry (iOS squircle rail)
+  readonly property real itemSize: frameConfig ? frameConfig.workspaceItemSize : 32
+  readonly property real itemRadius: frameConfig ? frameConfig.workspaceItemRadius : 10
+  readonly property real itemSpacing: frameConfig ? frameConfig.workspaceItemSpacing : 12
+  readonly property real railPadding: frameConfig ? frameConfig.workspaceRailPadding : 14
+
+  readonly property real baseHeight: frameConfig ? frameConfig.workspaceHeight : 216
+  // Rail always keeps its top/bottom padding, growing only if more slots exist
+  readonly property real railContentHeight: workspaceCount * itemSize
+    + Math.max(0, workspaceCount - 1) * itemSpacing + railPadding * 2
+  readonly property real targetHeight: Math.max(baseHeight, railContentHeight)
 
   readonly property real flareRadius: frameConfig ? frameConfig.workspaceFlareRadius : 8
   readonly property real cornerRadius: frameConfig ? frameConfig.workspaceCornerRadius : 16
@@ -32,14 +45,15 @@ Item {
 
   // When apps are opened, retract inwards flush with the left border (protrusion = 0).
   // When cursor moves to top-left edge OR on empty workspace, spring out immediately!
+  // Retracts at the exact same speed as the top Dynamic Island notch goes away (280ms settle).
   readonly property real targetReveal: (!root.hasOpenApps || root.isHovered) ? 1.0 : 0.0
   property real revealProgress: targetReveal
 
   Behavior on revealProgress {
     NumberAnimation {
       duration: (!root.hasOpenApps || root.isHovered)
-        ? (root.frameConfig ? root.frameConfig.workspaceOpenDuration : 380)
-        : (root.frameConfig ? root.frameConfig.workspaceCloseDuration : 260)
+        ? (root.frameConfig ? root.frameConfig.workspaceOpenDuration : 340)
+        : (root.frameConfig ? root.frameConfig.workspaceCloseDuration : 280)
       easing.type: (!root.hasOpenApps || root.isHovered) ? Easing.OutBack : Easing.OutCubic
       easing.overshoot: (!root.hasOpenApps || root.isHovered)
         ? (root.frameConfig ? root.frameConfig.workspaceOpenOvershoot : 1.08)
@@ -392,14 +406,15 @@ Item {
       }
 
       // =========================================================
-      // Downwise 1-Column Workspaces Layout (1 on top, down to 5)
+      // Refined iOS Rail: 1-Column Workspaces (1 on top, down to 5)
+      // Numbers sit on one shared optical axis; only the active one is a pill.
       // =========================================================
       Column {
         id: workspacesColumn
         anchors.verticalCenter: parent.verticalCenter
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.horizontalCenterOffset: root.borderThickness * 0.5
-        spacing: 8
+        // Explicit inset so the pills keep identical left/right padding
+        x: root.borderThickness + root.sidePadding
+        spacing: root.itemSpacing
         opacity: Math.min(1.0, Math.max(0.0, (root.revealProgress - 0.25) * 1.33))
         visible: opacity > 0.01
 
@@ -412,14 +427,14 @@ Item {
 
             readonly property bool isCurrent: root.activeWorkspaceId === modelData
             readonly property bool isOccupied: root.isWorkspaceOccupied(modelData)
-            readonly property bool isBtnHovered: Boolean(itemHover && itemHover.hovered)
+            readonly property bool isBtnHovered: Boolean(itemHover && itemHover.hovered) && !wsItem.isCurrent
             readonly property bool isBtnPressed: Boolean(itemTap && itemTap.pressed)
 
-            width: 32
-            height: 32
+            width: root.itemSize
+            height: root.itemSize
 
-            // iOS Press Feedback (instant 0.92 squish, OutBack spring pop)
-            scale: isBtnPressed ? 0.92 : (isBtnHovered ? 1.08 : 1.0)
+            // iOS Press Feedback (instant squish, OutBack spring pop)
+            scale: isBtnPressed ? 0.94 : (isBtnHovered ? 1.06 : 1.0)
             transformOrigin: Item.Center
 
             Behavior on scale {
@@ -430,34 +445,38 @@ Item {
               }
             }
 
-            // Apple circular pill
+            // Clean number axis: only the active workspace is a white squircle,
+            // occupied workspaces read through digit brightness, empty ones recede.
             Rectangle {
               anchors.fill: parent
-              radius: 16
+              radius: root.itemRadius
+
               color: wsItem.isCurrent
                 ? "#ffffff"
-                : (wsItem.isBtnHovered
-                    ? Qt.rgba(255, 255, 255, 0.28)
-                    : (wsItem.isOccupied ? Qt.rgba(255, 255, 255, 0.16) : Qt.rgba(255, 255, 255, 0.07)))
-
-              border.width: wsItem.isCurrent ? 0 : 1
-              border.color: wsItem.isBtnHovered
-                ? Qt.rgba(255, 255, 255, 0.35)
-                : Qt.rgba(255, 255, 255, 0.12)
+                : (wsItem.isBtnHovered ? Qt.rgba(1, 1, 1, 0.18) : "transparent")
 
               Behavior on color {
-                ColorAnimation { duration: 160 }
+                ColorAnimation { duration: 160; easing.type: Easing.OutCubic }
               }
 
-              // Workspace Number
+              // Workspace number, optically centered in the pill
               Text {
                 anchors.centerIn: parent
+
                 text: String(wsItem.modelData)
                 color: wsItem.isCurrent ? root.notchColor : root.textColor
                 font.family: root.fontFamily
                 font.pixelSize: 13
-                font.bold: wsItem.isCurrent || wsItem.isOccupied
-                opacity: wsItem.isCurrent || wsItem.isOccupied ? 1.0 : 0.55
+                font.weight: wsItem.isCurrent
+                  ? Font.DemiBold
+                  : (wsItem.isOccupied ? Font.Medium : Font.Normal)
+                opacity: wsItem.isCurrent
+                  ? 1.0
+                  : (wsItem.isOccupied ? 0.92 : (wsItem.isBtnHovered ? 0.88 : 0.50))
+
+                Behavior on opacity {
+                  NumberAnimation { duration: 160; easing.type: Easing.OutCubic }
+                }
               }
             }
 

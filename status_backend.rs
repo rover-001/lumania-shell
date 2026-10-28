@@ -72,7 +72,7 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
 
     let out = run_cmd(&[
         "nmcli", "-t", "-f", "in-use,ssid,signal,security",
-        "dev", "wifi", "list"
+        "dev", "wifi", "list", "--rescan", "no"
     ]);
 
     let mut networks: Vec<WifiNetwork> = Vec::new();

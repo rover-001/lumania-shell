@@ -1,0 +1,3 @@
+#!/bin/bash
+export PATH="/home/rover/.local/bin:/usr/share/omarchy/bin:/usr/local/bin:/usr/bin:$PATH"
+exec /usr/share/omarchy/bin/omarchy-shell lumania.wallpaper toggle

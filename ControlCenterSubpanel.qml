@@ -76,20 +76,17 @@ Item {
 
   // Driver value for iOS Fluid Motion: 0.0 (closed) -> 1.0 (fully bloomed)
   readonly property real targetProgress: isOpen ? 1.0 : 0.0
+  property real openProgress: targetProgress
 
-  // Blooming is a large surface: 0.42s at zeta 0.85 (energetic, ~0.6% settle
-  // overshoot). Collapsing is critically damped so it never bounces away from
-  // the card edge it melts into. Retargeting mid-flight keeps velocity.
-  FluidSpring {
-    id: bloomSpring
-    target: root.targetProgress
-    response: root.isOpen ? 0.42 : 0.34
-    dampingFraction: root.isOpen ? 0.85 : 1.0
-    epsilon: 0.0004
-    reduceMotion: root.reduceMotion
+  Behavior on openProgress {
+    NumberAnimation {
+      duration: root.reduceMotion
+        ? (root.isOpen ? 180 : 140)
+        : (root.isOpen ? 280 : 200)
+      easing.type: (root.reduceMotion || !root.isOpen) ? Easing.OutCubic : Easing.OutBack
+      easing.overshoot: (root.reduceMotion || !root.isOpen) ? 1.0 : 1.06
+    }
   }
-
-  readonly property real openProgress: bloomSpring.value
 
   // Mask item exposed to PanelWindow
   property alias maskItem: subpanelCard

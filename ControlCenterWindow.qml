@@ -91,6 +91,11 @@ Item {
           Region {
             item: controlNotch.maskItem
           }
+          // Keeps the corner wake zone live while the gusset is retracted, so
+          // hovering anywhere in the bloom footprint still opens the menu.
+          Region {
+            item: controlNotch.wakeItem
+          }
           Region {
             item: controlNotch.backdropItem
           }

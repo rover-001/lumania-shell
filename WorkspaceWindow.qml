@@ -41,7 +41,7 @@ Item {
         }
 
         implicitWidth: root.frameConfig.workspaceWidth + 30
-        implicitHeight: root.frameConfig.workspaceTopMargin + root.frameConfig.workspaceHeight + 30
+        implicitHeight: root.frameConfig.workspaceTopMargin + workspaceNotch.targetHeight + 30
 
         color: "transparent"
         surfaceFormat.opaque: false

@@ -84,10 +84,10 @@ Item {
     else root.open()
   }
 
-  // Grace period so the menu doesn't snap shut while the cursor crosses a gap
+  // Grace period so the menu doesn't snap shut while the cursor crosses a gap into the subpanel
   Timer {
     id: hoverCloseTimer
-    interval: 240
+    interval: 160
     repeat: false
     onTriggered: {
       var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
@@ -95,22 +95,20 @@ Item {
           && !notchHover.hovered && !subpanelHovered) {
         statusSubpanel.isOpen = false
       }
-      if (!root.isPinned && !root.isOpen && !notchHover.hovered && !subpanelHovered) {
-        root.isHoverOpen = false
+      if (!root.isPinned && !notchHover.hovered && !subpanelHovered) {
+        root.close()
       }
     }
   }
 
   // Pointer watchdog -------------------------------------------------------
-  // Hover-exit events are not guaranteed (fast warps, surface leaves, pointer
-  // grabs), which used to leave the card or its subpanel stuck open. Poll the
-  // real containment instead and retract once the pointer is truly gone.
+  // Safety net for rapid cursor leaves / window focus losses
   property bool pointerEngaged: true
   property int outsideTicks: 0
 
   function syncPointerWatchdog() {
     var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
-    var inside = notchHover.hovered || subpanelHovered
+    var inside = notchHover.hovered || subpanelHovered || cornerTriggerHover.hovered
     if (inside) {
       root.pointerEngaged = true
       root.outsideTicks = 0
@@ -118,18 +116,16 @@ Item {
     }
     if (!root.pointerEngaged || root.isPinned) return
     root.outsideTicks++
-    // Two ticks (~360ms) of separation so a diagonal pass over the gap between
-    // the card and the subpanel does not slam it shut.
-    if (root.outsideTicks < 2) return
+    if (root.outsideTicks < 1) return
     root.outsideTicks = 0
     root.pointerEngaged = false
     root.close()
   }
 
   Timer {
-    interval: 180
+    interval: 120
     repeat: true
-    running: root.isOpenEffective
+    running: root.isOpenEffective && !root.isPinned
     onTriggered: root.syncPointerWatchdog()
   }
 
@@ -149,32 +145,39 @@ Item {
   // Driver value: 0.0 (resting gusset) -> 1.0 (full control menu)
   readonly property real targetProgress: root.isOpenEffective ? 1.0 : 0.0
 
-  // Large surface: slower, heavier spring. Present ~0.42s at zeta 0.85 (0.6%
-  // settle overshoot); dismiss ~0.34s critically damped so it never bounces on
-  // the way back into the frame. Retargeting mid-flight keeps velocity.
-  FluidSpring {
-    id: bloomSpring
-    target: root.targetProgress
-    response: root.isOpenEffective ? 0.42 : 0.34
-    dampingFraction: root.isOpenEffective ? 0.85 : 1.0
-    epsilon: 0.0004
-    reduceMotion: root.reduceMotion
+  // Same motion contract as the bottom search notch: an energetic OutBack
+  // bloom on open and a shorter OutCubic settle on close. Reduced motion keeps
+  // the transition but drops the overshoot and shortens it.
+  property real openProgress: targetProgress
+
+  Behavior on openProgress {
+    NumberAnimation {
+      duration: root.reduceMotion
+        ? (root.isOpenEffective ? 180 : 140)
+        : (root.isOpenEffective ? (root.frameConfig ? root.frameConfig.controlOpenDuration : 380)
+                                : (root.frameConfig ? root.frameConfig.controlCloseDuration : 260))
+      easing.type: (root.reduceMotion || !root.isOpenEffective) ? Easing.OutCubic : Easing.OutBack
+      easing.overshoot: (root.reduceMotion || !root.isOpenEffective)
+        ? 1.0
+        : (root.frameConfig ? root.frameConfig.controlOpenOvershoot : 1.08)
+    }
   }
 
-  readonly property real openProgress: bloomSpring.value
+  readonly property real progressNorm: Math.min(1.0, Math.max(0.0, openProgress))
 
   // iOS liquid stretch: sinusoidal volume pulse mid-transition
   readonly property real currentWidth: collapsedWidth
     + (openProgress * (expandedWidth - collapsedWidth))
-    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * 10.0)
+    + (Math.sin(progressNorm * Math.PI) * (root.frameConfig ? root.frameConfig.controlWidthPulse : 10))
 
   readonly property real currentHeight: collapsedHeight
     + (openProgress * (expandedHeight - collapsedHeight))
-    + (Math.sin(Math.min(1.0, Math.max(0.0, openProgress)) * Math.PI) * 6.0)
+    + (Math.sin(progressNorm * Math.PI) * (root.frameConfig ? root.frameConfig.controlHeightPulse : 6))
 
   // Exposed items for PanelWindow masking
   property alias maskItem: notchContainer
   property alias backdropItem: backdropOverlay
+  property alias wakeItem: cornerTriggerItem
   property alias statusPanel: statusSubpanel
   readonly property Item subpanelMaskItem: (statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.openProgress > 0.01)) ? statusSubpanel.maskItem : null
 
@@ -510,28 +513,42 @@ Item {
   }
 
   // =========================================================================
-  // Fixed Bottom-Right Corner Edge Trigger: stays pinned at corner to wake notch
+  // Bottom-Right Wake Zone: a shallow strip along the border that keeps the
+  // notch reachable while the gusset is retracted into the frame. Mirrors the
+  // wallpaper / search notches: touching the strip springs the gusset back out
+  // and blooms the menu, so the pointer never has to find the ~12px sliver that
+  // is all that stays on screen while retracted. Exposed as `wakeItem` because
+  // the host window must add it to the input mask — an unmasked item receives
+  // no pointer events at all.
   // =========================================================================
+  readonly property bool wakeZoneActive: root.shouldRetract
+
   Item {
     id: cornerTriggerItem
     anchors.bottom: parent.bottom
     anchors.right: parent.right
-    width: Math.max(64, root.collapsedWidth)
-    height: Math.max(48, root.collapsedHeight)
+    width: root.wakeZoneActive ? Math.max(180, root.collapsedWidth) : 0
+    height: root.wakeZoneActive ? root.borderThickness + 24 : 0
 
     HoverHandler {
       id: cornerTriggerHover
+      cursorShape: Qt.PointingHandCursor
+      onHoveredChanged: {
+        if (hovered) {
+          root.open()
+        } else {
+          var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+          if (!notchHover.hovered && !subpanelHovered && !root.isPinned) {
+            root.close()
+          }
+        }
+      }
     }
   }
 
-  readonly property bool isCornerActive: cornerTriggerHover.hovered
-    || (notchHover && notchHover.hovered)
-    || Boolean(statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
-    || root.isOpenEffective
-
   // Auto-retract inward into screen border when apps are opened;
-  // Springs out immediately when cursor touches bottom-right corner or menu opens
-  readonly property bool shouldRetract: root.hasOpenApps && !root.isCornerActive && root.openProgress < 0.05
+  // Retracts with the exact same curve and timing as the bottom search notch
+  readonly property bool shouldRetract: root.hasOpenApps && !root.isOpenEffective && !(statusSubpanel && (statusSubpanel.isOpen || statusSubpanel.isHovered || statusSubpanel.isPinned))
 
   // =========================================================================
   // Full-Screen Click-Away Catcher (no backdrop dimming)
@@ -558,32 +575,28 @@ Item {
     anchors.right: parent.right
 
     // iOS Fluid Retract Offsets:
-    // Retracts down and right flush with the 12px screen frame
+    // Retracts down and right flush with the screen frame, identical to bottom search notch
     readonly property real targetRetractY: root.shouldRetract ? -(root.collapsedHeight - root.borderThickness) : 0.0
     readonly property real targetRetractX: root.shouldRetract ? -(root.collapsedWidth - root.borderThickness) : 0.0
 
-    // Retracting is a settle (critically damped); waking back out gets a little
-    // momentum. Both springs keep their velocity if a wake lands mid-retract.
-    FluidSpring {
-      id: retractYSpring
-      target: notchContainer.targetRetractY
-      response: root.shouldRetract ? 0.28 : 0.36
-      dampingFraction: root.shouldRetract ? 1.0 : 0.8
-      epsilon: 0.05
-      reduceMotion: root.reduceMotion
+    property real currentRetractY: targetRetractY
+    property real currentRetractX: targetRetractX
+
+    Behavior on currentRetractY {
+      NumberAnimation {
+        duration: root.shouldRetract ? 280 : 380
+        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
+        easing.overshoot: 1.08
+      }
     }
 
-    FluidSpring {
-      id: retractXSpring
-      target: notchContainer.targetRetractX
-      response: root.shouldRetract ? 0.28 : 0.36
-      dampingFraction: root.shouldRetract ? 1.0 : 0.8
-      epsilon: 0.05
-      reduceMotion: root.reduceMotion
+    Behavior on currentRetractX {
+      NumberAnimation {
+        duration: root.shouldRetract ? 280 : 380
+        easing.type: root.shouldRetract ? Easing.OutCubic : Easing.OutBack
+        easing.overshoot: 1.08
+      }
     }
-
-    readonly property real currentRetractY: retractYSpring.value
-    readonly property real currentRetractX: retractXSpring.value
 
     anchors.bottomMargin: currentRetractY
     anchors.rightMargin: currentRetractX
@@ -603,7 +616,18 @@ Item {
           root.refreshAll()
           root.refreshStatus()
         } else {
-          hoverCloseTimer.restart()
+          // Same contract as the search notch: retract on the frame the pointer
+          // leaves. The grace timer exists only to let the cursor cross the gap
+          // into the status subpanel, so skip it when no subpanel is involved.
+          var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+          if ((statusSubpanel && statusSubpanel.isOpen) || subpanelHovered) {
+            hoverCloseTimer.restart()
+          } else {
+            hoverCloseTimer.stop()
+            if (!root.isPinned) {
+              root.close()
+            }
+          }
         }
       }
     }

@@ -36,14 +36,14 @@ Item {
 
   Process {
     id: workspaceStateProbe
-    command: ["sh", "-c", "ws=$(hyprctl activeworkspace -j 2>/dev/null); win=$(hyprctl activewindow -j 2>/dev/null); echo \"$ws $win\" | jq -r -s \"((.[0].windows // 0 | tostring) + \\\" \\\" + ((.[0].hasfullscreen == true or (.[1].fullscreen != null and .[1].fullscreen > 0) or (.[1].fullscreenClient != null and .[1].fullscreenClient > 0)) | if . then \\\"1\\\" else \\\"0\\\" end))\" 2>/dev/null"]
+    command: ["sh", "-c", "ws=$(hyprctl activeworkspace -j 2>/dev/null); win=$(hyprctl activewindow -j 2>/dev/null); mon=$(hyprctl monitors -j 2>/dev/null); echo \"$ws $win $mon\" | jq -r -s 'def has_special: (.[2] // []) | any(.specialWorkspace.name != null and .specialWorkspace.name != \"\" and .specialWorkspace.id != 0); def ws_windows: (.[0].windows // 0); def has_pinned: (.[1].pinned == true); def is_full: (.[0].hasfullscreen == true or (.[1].fullscreen != null and .[1].fullscreen > 0) or (.[1].fullscreenClient != null and .[1].fullscreenClient > 0)); (((ws_windows > 0 or has_special or has_pinned) | if . then \"1\" else \"0\" end) + \" \" + (is_full | if . then \"1\" else \"0\" end))' 2>/dev/null"]
     stdout: StdioCollector {
       onStreamFinished: {
         var raw = String(text || "").trim().split(/\s+/)
         if (raw.length >= 2) {
-          var winCount = parseInt(raw[0], 10) || 0
+          var hasApps = (raw[0] === "1")
           var isFull = (raw[1] === "1")
-          root.hasOpenApps = (winCount > 0)
+          root.hasOpenApps = hasApps
           root.fullscreenActive = isFull
         }
       }
@@ -176,4 +176,24 @@ Item {
     fullscreen: root.fullscreenActive
     hasOpenApps: root.hasOpenApps
   }
+
+  // 6. Bottom Center Wallpaper Window (filmstrip notch for switching wallpapers)
+  WallpaperWindow {
+    id: wallpaperWindow
+    frameConfig: frameConfig
+    borderThickness: root.borderThickness
+    notchColor: root.islandColor
+    textColor: root.islandTextColor
+    mutedColor: root.islandMutedColor
+    fontFamily: root.fontFamily
+    barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
+  }
+
+  // Forward wallpaper convenience methods
+  property alias wallpaperOpen: wallpaperWindow.wallpaperOpen
+  function toggleWallpapers() { wallpaperWindow.toggleWallpapers() }
+  function openWallpapers() { wallpaperWindow.openWallpapers() }
+  function closeWallpapers() { wallpaperWindow.closeWallpapers() }
 }
