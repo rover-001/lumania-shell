@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Hang up the active Discord call by clicking the "Disconnect" button in Discord's
+# Voice Connected panel (bottom-left of the window), then restore the previous view.
+set -u
+
+info=$(hyprctl clients -j | jq -c '[.[]|select(.class=="discord")][0] // empty')
+[[ -z $info ]] && exit 0
+ws=$(jq -r '.workspace.name' <<<"$info")
+x=$(jq -r '.at[0]' <<<"$info"); y=$(jq -r '.at[1]' <<<"$info"); h=$(jq -r '.size[1]' <<<"$info")
+
+hidden=0
+if [[ $ws == special:* ]]; then
+  hidden=1
+  hyprctl dispatch "hl.dsp.workspace.toggle_special(\"${ws#special:}\")" >/dev/null
+  sleep 0.5
+fi
+
+# Disconnect icon: 331px from window left, 138px above window bottom
+tx=$((x + 331)); ty=$((y + h - 138))
+hyprctl dispatch "hl.dsp.cursor.move({ x = $tx, y = $ty })" >/dev/null
+sleep 0.1
+ydotool click 0xC0 >/dev/null 2>&1
+
+if (( hidden )); then
+  sleep 0.4
+  hyprctl dispatch "hl.dsp.workspace.toggle_special(\"${ws#special:}\")" >/dev/null
+fi

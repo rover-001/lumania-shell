@@ -1,0 +1,95 @@
+#!/usr/bin/env python3
+import subprocess, json, os, glob
+
+def get_call_status():
+    status = {
+        "inCall": False,
+        "app": "",
+        "caller": "",
+        "avatar": ""
+    }
+    
+    try:
+        so = subprocess.run(["pactl", "list", "source-outputs"], capture_output=True, text=True, timeout=1.0).stdout
+    except:
+        return status
+        
+    is_call = False
+    app_binary = ""
+    for block in so.split("Source Output #"):
+        if not block.strip(): continue
+        b_low = block.lower()
+        if "webrtc" in b_low or "recstream" in b_low or any(k in b_low for k in ["discord", "telegram", "whatsapp", "slack", "zoom", "meet"]):
+            is_call = True
+            for line in block.split("\n"):
+                if "application.process.binary" in line:
+                    app_binary = line.split("=")[-1].strip().replace("\"", "").lower()
+            break
+            
+    if not is_call:
+        return status
+        
+    status["inCall"] = True
+    status["app"] = app_binary or "call"
+    
+    # Fast path: check short-lived cache to avoid expensive hyprctl and disk globbing every run
+    cache_file = "/tmp/lumania-call-cache.json"
+    cached = {}
+    if os.path.exists(cache_file):
+        try:
+            with open(cache_file, "r") as f:
+                cached = json.load(f)
+        except Exception:
+            cached = {}
+
+    import time
+    now = time.time()
+    if cached.get("inCall") and cached.get("app") == status["app"] and (now - cached.get("ts", 0) < 15.0):
+        status["caller"] = cached.get("caller", "")
+        status["avatar"] = cached.get("avatar", "")
+        return status
+
+    # Try finding window title from Hyprland
+    try:
+        clients_raw = subprocess.run(["hyprctl", "clients", "-j"], capture_output=True, text=True, timeout=1.0).stdout
+        clients = json.loads(clients_raw)
+        for c in clients:
+            c_class = (c.get("class") or "").lower()
+            if app_binary in c_class or ("discord" in c_class and "discord" in app_binary):
+                title = c.get("title", "")
+                if " - Discord" in title:
+                    title = title.replace(" - Discord", "")
+                status["caller"] = title
+                break
+    except:
+        pass
+        
+    # Find avatar: search for recent avatar in Discord cache or user avatars
+    avatar_path = ""
+
+    # Prefer the picture of the person we actually exchanged notifications with:
+    # exact name match against the window title, else the most recent sender.
+    import re
+    app_key = re.sub(r"[^a-z0-9]+", "", app_binary) or "discord"
+    saved = [p for p in glob.glob("/tmp/lumania-avatars/*__*.png")
+             if os.path.basename(p).split("__")[0] in app_key or app_key in os.path.basename(p).split("__")[0]]
+    if saved:
+        caller_key = re.sub(r"[^a-z0-9]+", "", status["caller"].lower())
+        match = [p for p in saved if caller_key and os.path.basename(p)[:-4].split("__")[1] in caller_key]
+        pick = match[0] if match else max(saved, key=os.path.getmtime)
+        status["avatar"] = pick
+    else:
+        status["avatar"] = ""
+
+    try:
+        status["ts"] = now
+        with open(cache_file, "w") as f:
+            json.dump(status, f)
+        del status["ts"]
+    except Exception:
+        pass
+
+    return status
+
+if __name__ == "__main__":
+    print(json.dumps(get_call_status()))

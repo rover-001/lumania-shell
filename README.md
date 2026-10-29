@@ -41,7 +41,8 @@ Entry point is `IslandBar.qml` (registered as the Omarchy bar plugin `lumania.is
 - Omarchy (Arch Linux) with Hyprland and `omarchy-shell` / Quickshell
 - PipeWire (for the visualizer)
 - `rustc` (only to rebuild the helpers)
-- `python3` (for `lumania-focus`, used to focus apps from notifications)
+- `python3` (for `lumania-focus` and `lumania-call-status`: focusing apps from notifications, detecting voice calls)
+- Optional: `ydotool` and `jq` for the island's hang-up button (`lumania-call-cut`). It clicks Discord's Disconnect button, so it currently works only with Discord in its default layout.
 
 ## Getting started
 
