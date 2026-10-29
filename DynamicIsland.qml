@@ -29,10 +29,10 @@ Item {
   // Persist a notification's sender picture so repeat messages / calls can reuse it
   function saveAvatar(img) {
     var nm = root.notificationManager
-    if (!nm || String(img.source).indexOf("image://") !== 0) return
+    if (!nm || !nm.avatarDir || String(img.source).indexOf("image://") !== 0) return
     var key = nm.senderKey(nm.currentAppName, nm.currentSummary)
     var path = nm.avatarDir + "/" + key + ".png"
-    Quickshell.execDetached(["mkdir", "-p", nm.avatarDir])
+    Quickshell.execDetached(["sh", "-c", "mkdir -p -m 700 \"$1\" && chmod 700 \"$1\"", "sh", nm.avatarDir])
     img.grabToImage(function(result) {
       if (result.saveToFile(path)) {
         var m = nm.savedAvatars

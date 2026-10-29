@@ -6,6 +6,18 @@ def cache_path():
     runtime = os.environ.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
     return os.path.join(runtime, "lumania-call-cache.json")
 
+def avatar_dir():
+    return os.path.join(os.path.dirname(cache_path()), "lumania-avatars")
+
+def remove_legacy_cache():
+    # Earlier versions left a world-readable cache in /tmp; remove it if it is ours
+    legacy = "/tmp/lumania-call-cache.json"
+    try:
+        if os.lstat(legacy).st_uid == os.getuid():
+            os.remove(legacy)
+    except OSError:
+        pass
+
 def get_call_status():
     status = {
         "inCall": False,
@@ -81,7 +93,7 @@ def get_call_status():
     # exact name match against the window title, else the most recent sender.
     import re
     app_key = re.sub(r"[^a-z0-9]+", "", app_binary) or "discord"
-    saved = [p for p in glob.glob("/tmp/lumania-avatars/*__*.png")
+    saved = [p for p in glob.glob(os.path.join(avatar_dir(), "*__*.png"))
              if os.path.basename(p).split("__")[0] in app_key or app_key in os.path.basename(p).split("__")[0]]
     if saved:
         caller_key = re.sub(r"[^a-z0-9]+", "", status["caller"].lower())
@@ -106,4 +118,5 @@ def get_call_status():
     return status
 
 if __name__ == "__main__":
+    remove_legacy_cache()
     print(json.dumps(get_call_status()))

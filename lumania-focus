@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
+import os
 import sys
 import json
 import subprocess
 import re
 
 def main():
-    if len(sys.argv) < 2:
+    # Queries come from the environment (private to this user); argv kept for compatibility
+    queries = [os.environ.get("LUMANIA_FOCUS_APP", ""), os.environ.get("LUMANIA_FOCUS_SUMMARY", "")]
+    queries = [q for q in queries if q] or sys.argv[1:]
+    if not queries:
         return
-
-    queries = sys.argv[1:]
     patterns = []
 
     for q in queries:

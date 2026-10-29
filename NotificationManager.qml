@@ -24,9 +24,11 @@ Item {
   // Focus / Do Not Disturb: suppress popups (critical urgency still passes)
   property bool dnd: false
 
-  // Per-sender avatar files (/tmp/lumania-avatars) so repeat messages from the same
-  // person keep their picture when the sender omits it, and calls can reuse it.
-  readonly property string avatarDir: "/tmp/lumania-avatars"
+  // Per-sender avatar files ($XDG_RUNTIME_DIR/lumania-avatars, owner-only) so repeat
+  // messages from the same person keep their picture when the sender omits it, and
+  // calls can reuse it. Empty when no private runtime dir exists (avatars not saved).
+  readonly property string runtimeDir: String(Quickshell.env("XDG_RUNTIME_DIR") || "")
+  readonly property string avatarDir: runtimeDir ? runtimeDir + "/lumania-avatars" : ""
   property var savedAvatars: ({})
 
   function senderKey(app, summary) {
@@ -41,6 +43,14 @@ Item {
   // Ensure Omarchy's default notification plugin remains disabled
   Component.onCompleted: {
     ensureDefaultDisabled()
+    legacyCleanupProc.running = true
+  }
+
+  // Remove world-readable caches left in /tmp by earlier versions (only our own files)
+  Process {
+    id: legacyCleanupProc
+    command: ["sh", "-c", "for p in /tmp/lumania-avatars /tmp/lumania-call-cache.json; do [ -O \"$p\" ] && rm -rf -- \"$p\"; done; true"]
+    running: false
   }
 
   function ensureDefaultDisabled() {
@@ -313,10 +323,14 @@ Item {
   }
 
   function focusApp(app, summary) {
+    // Pass the query via environment, not argv: /proc/<pid>/environ is owner-only,
+    // while argv is readable by every local account
+    focusAppProc.environment = {
+      "LUMANIA_FOCUS_APP": String(app || ""),
+      "LUMANIA_FOCUS_SUMMARY": String(summary || "")
+    }
     focusAppProc.command = [
-      decodeURIComponent(Qt.resolvedUrl("lumania-focus").toString().replace(/^file:\/\//, "")),
-      String(app || ""),
-      String(summary || "")
+      decodeURIComponent(Qt.resolvedUrl("lumania-focus").toString().replace(/^file:\/\//, ""))
     ]
     focusAppProc.running = true
   }
