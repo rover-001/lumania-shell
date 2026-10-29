@@ -72,7 +72,7 @@ Item {
 
   Timer {
     id: callPollTimer
-    interval: root.inCall ? 1000 : 2000
+    interval: root.inCall ? 3000 : 3500
     running: true
     repeat: true
     onTriggered: {

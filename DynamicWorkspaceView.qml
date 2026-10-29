@@ -61,6 +61,7 @@ Item {
   property bool sinkCheckPending: false
 
   function triggerSinkCheck() {
+    if (root.mprisPlaying) return // MPRIS already drives visualizer with zero subprocess overhead
     if (sinkInputCheck.running) {
       sinkCheckPending = true
       return
@@ -69,15 +70,15 @@ Item {
     sinkInputCheck.running = true
   }
 
-  // Coalesces bursts of PipeWire events into one sink-input scan per window
+  // Coalesces bursts of PipeWire events into one throttled sink-input scan
   Timer {
     id: sinkCheckThrottle
-    interval: 150
+    interval: 1000
     repeat: false
     onTriggered: root.triggerSinkCheck()
   }
 
-  // Real-time PipeWire audio event push (sub-millisecond notification on non-MPRIS stream state change)
+  // Real-time PipeWire audio event push (only reacts to stream creation/deletion)
   Process {
     id: pactlSubscriber
     command: ["pactl", "subscribe"]
@@ -85,7 +86,7 @@ Item {
     stdout: SplitParser {
       onRead: function(line) {
         var str = String(line || "")
-        if (str.indexOf("sink-input") !== -1 || str.indexOf("sink") !== -1) {
+        if (str.indexOf("sink-input") !== -1) {
           if (!sinkCheckThrottle.running) sinkCheckThrottle.start()
         }
       }
@@ -106,9 +107,9 @@ Item {
     }
   }
 
-  // Fast fallback polling for non-MPRIS audio
+  // Fallback polling for non-MPRIS audio
   Timer {
-    interval: root.nonMprisPlaying ? 1500 : 2500
+    interval: root.nonMprisPlaying ? 2500 : 4000
     running: true
     repeat: true
     onTriggered: {

@@ -63,7 +63,6 @@ Item {
   function start() {
     if (spring.tracking) return
     if (ticker.running) return
-    spring.lastTick = Date.now()
     ticker.start()
   }
 
@@ -72,7 +71,6 @@ Item {
   }
 
   // ---- Internals ----------------------------------------------------------
-  property double lastTick: 0
   property bool ready: false
 
   // Effective parameters (reduced motion shortens and damps the spring).
@@ -119,18 +117,15 @@ Item {
   onResponseChanged: if (spring.ready && !spring.tracking) spring.start()
   onDampingFractionChanged: if (spring.ready && !spring.tracking) spring.start()
 
-  Timer {
+  // Hardware vsync-synchronized frame animation (matches display refresh rate, e.g. 144 Hz)
+  // Eliminates timer jitter, phase beating, and missed callbacks under CPU load.
+  FrameAnimation {
     id: ticker
-    interval: 8
-    repeat: true
-    onTriggered: spring.step()
-  }
-
-  function step() {
-    const now = Date.now()
-    const dt = Math.max(0.001, Math.min((now - spring.lastTick) / 1000, 0.05))
-    spring.lastTick = now
-    spring.advance(dt)
+    running: false
+    onTriggered: {
+      const dt = Math.max(0.001, Math.min(frameTime > 0 ? frameTime : 0.007, 0.033))
+      spring.advance(dt)
+    }
   }
 
   // Closed-form solution of the damped oscillator for one time step.

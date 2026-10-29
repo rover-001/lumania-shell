@@ -72,13 +72,13 @@ Item {
     return Math.max(minHeight, Math.min(maxHeight, t))
   }
 
-  // Advance all springs by dt seconds using fixed sub-steps for stable integration
+  // Advance all springs by dt seconds using in-place state integration (zero GC thrashing)
   function stepSprings(dt) {
     ensureSpringState()
-    var p = springPos.slice()
-    var v = springVel.slice()
-    var remaining = Math.min(dt, 1 / 30)
-    var sub = 1 / 240
+    var p = springPos
+    var v = springVel
+    var remaining = Math.min(dt, 0.033)
+    var sub = 1 / 180
 
     while (remaining > 0) {
       var s = Math.min(sub, remaining)
@@ -92,12 +92,18 @@ Item {
       remaining -= s
     }
 
-    var out = []
-    for (var k = 0; k < barCount; k++) {
-      out.push(Math.max(0, Math.min(maxHeight, p[k])))
+    var maxDiff = 0
+    for (var j = 0; j < barCount; j++) {
+      var d = Math.abs(p[j] - (displayHeights.length > j ? displayHeights[j] : minHeight))
+      if (d > maxDiff) maxDiff = d
     }
-    springPos = p
-    springVel = v
+    // If all bars are quiet/settled (e.g. silence or pauses between words), skip repainting
+    if (maxDiff < 0.05 && displayHeights.length === barCount) return
+
+    var out = new Array(barCount)
+    for (var k = 0; k < barCount; k++) {
+      out[k] = Math.max(0, Math.min(maxHeight, p[k]))
+    }
     displayHeights = out
   }
 
@@ -106,14 +112,12 @@ Item {
     ensureSpringState()
   }
 
-  // Per-frame driver, runs at display refresh rate while the visualizer is active
+  // Per-frame driver, hardware-synchronized with display refresh rate (144 Hz)
   FrameAnimation {
     id: springDriver
     running: root.active
     onTriggered: {
-      var now = Date.now()
-      var dt = (now - root.lastFrameMs) / 1000
-      root.lastFrameMs = now
+      var dt = Math.max(0.001, Math.min(frameTime > 0 ? frameTime : 0.007, 0.033))
       root.stepSprings(dt)
     }
   }
