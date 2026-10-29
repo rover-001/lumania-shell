@@ -40,51 +40,38 @@ Entry point is `IslandBar.qml` (registered as the Omarchy bar plugin `lumania.is
 
 - Omarchy (Arch Linux) with Hyprland and `omarchy-shell` / Quickshell
 - PipeWire (for the visualizer)
-- `rustc` to build the helpers
+- `rustc` (only to rebuild the helpers)
 - `python3` (for `lumania-focus`, used to focus apps from notifications)
 
 ## Getting started
 
-**1. Clone to `~/Projects/lumania shell`.**
-Several QML files call the Rust helpers by this exact path, so keep it (including the space) unless you also edit those paths.
+**1. Install from the Omarchy plugin marketplace** (or straight from git):
 
 ```bash
-git clone https://github.com/rover-001/lumania-shell.git ~/Projects/"lumania shell"
-cd ~/Projects/"lumania shell"
+omarchy plugin add https://github.com/rover-001/lumania-shell.git --enable
 ```
 
-**2. Build the helpers.**
+This clones the plugin into `~/.config/omarchy/plugins/lumania.island` and makes it the active bar. Plugins land disabled until you enable them, so you can drop `--enable` and read the code first, then run `omarchy plugin enable lumania.island`.
+
+**2. Helpers.** Prebuilt x86_64 binaries ship in the repo:
+- `lumania-vis` reads audio from PipeWire and drives the visualizer
+- `lumania-colors` picks accent colors from the current wallpaper
+- `lumania-status` reports Wi-Fi, Bluetooth and battery state to the control center
+
+The plugin calls them from its own folder, wherever it is installed. To rebuild them from source (another architecture, or after editing a `.rs` file):
 
 ```bash
-./build.sh
+cd ~/.config/omarchy/plugins/lumania.island && ./build.sh
 ```
 
-This compiles three binaries with `rustc`:
-- `lumania-vis` – reads audio from PipeWire and feeds the visualizer
-- `lumania-colors` – picks accent colors from the current wallpaper
-- `lumania-status` – Wi-Fi / Bluetooth / battery info for the control center
+**Updating:** `omarchy plugin update lumania.island`. **Removing:** `omarchy plugin remove lumania.island`.
 
-**3. Register it as an Omarchy plugin.**
-
-```bash
-mkdir -p ~/.config/omarchy/plugins
-ln -s ~/Projects/"lumania shell" ~/.config/omarchy/plugins/lumania.island
-```
-
-**4. Make it the active bar** in `~/.config/omarchy/shell.json`:
-
-```json
-{
-  "activeBar": "lumania.island"
-}
-```
-
-**5. (Optional) Put the launcher scripts on your PATH and bind keys.**
+**3. (Optional) Put the launcher scripts on your PATH and bind keys.**
 
 ```bash
 mkdir -p ~/.local/bin
 for s in lumania-search lumania-wallpaper lumania-focus; do
-  ln -sf ~/Projects/"lumania shell"/$s ~/.local/bin/$s
+  ln -sf ~/.config/omarchy/plugins/lumania.island/$s ~/.local/bin/$s
 done
 ```
 
@@ -95,7 +82,7 @@ bind = SUPER, SPACE, exec, lumania-search
 bind = SUPER CTRL, SPACE, exec, lumania-wallpaper
 ```
 
-**6. Restart the shell.**
+**4. Restart the shell.**
 
 ```bash
 omarchy restart shell
@@ -124,4 +111,4 @@ If you like Lumania Shell, you can support development here:
 
 ## License
 
-MIT
+MIT, see [LICENSE](LICENSE).

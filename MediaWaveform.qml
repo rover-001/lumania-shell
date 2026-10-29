@@ -161,7 +161,7 @@ Item {
   Process {
     id: audioProcess
     running: root.active
-    command: [Quickshell.env("HOME") + "/Projects/lumania shell/lumania-vis"]
+    command: [decodeURIComponent(Qt.resolvedUrl("lumania-vis").toString().replace(/^file:\/\//, ""))]
     stdout: SplitParser {
       onRead: function(line) {
         var str = String(line || "").trim()

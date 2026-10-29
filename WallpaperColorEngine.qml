@@ -11,7 +11,7 @@ Item {
   // Native Rust Wallpaper Color Engine (sub-millisecond color extraction)
   Process {
     id: rustColorProc
-    command: ["/home/rover/Projects/lumania shell/lumania-colors"]
+    command: [decodeURIComponent(Qt.resolvedUrl("lumania-colors").toString().replace(/^file:\/\//, ""))]
     running: true
     stdout: StdioCollector {
       onStreamFinished: {

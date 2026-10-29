@@ -314,7 +314,7 @@ Item {
 
   function focusApp(app, summary) {
     focusAppProc.command = [
-      Quickshell.env("HOME") + "/Projects/lumania shell/lumania-focus",
+      decodeURIComponent(Qt.resolvedUrl("lumania-focus").toString().replace(/^file:\/\//, "")),
       String(app || ""),
       String(summary || "")
     ]

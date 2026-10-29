@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "rover",
   "license": "MIT",
-  "description": "Dynamic Island status bar for Omarchy and Hyprland",
+  "description": "Full desktop shell for Omarchy: screen frame, Dynamic Island, and pop-out notches for launcher, wallpapers, workspaces and control center.",
   "kinds": [
     "bar"
   ],

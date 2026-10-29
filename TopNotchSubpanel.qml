@@ -61,7 +61,7 @@ Item {
   // -------------------------------------------------------------------------
   // System State & Backend Communications (Native Rust Binary)
   // -------------------------------------------------------------------------
-  readonly property string backendScript: "/home/rover/Projects/lumania shell/lumania-status"
+  readonly property string backendScript: decodeURIComponent(Qt.resolvedUrl("lumania-status").toString().replace(/^file:\/\//, ""))
 
   property var wifiData: ({
     enabled: true,
