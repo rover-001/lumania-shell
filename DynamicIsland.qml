@@ -125,6 +125,7 @@ Item {
 
   Component.onCompleted: {
     updateClock()
+    root.refreshStickyPlayer()
     if (!callStatusProc.running) callStatusProc.running = true
   }
 
@@ -133,6 +134,45 @@ Item {
     running: true
     repeat: true
     onTriggered: root.updateClock()
+  }
+
+  // -------------------------------------------------------------------------
+  // Media artwork resolution (Spotify/MPRIS cover art + YouTube thumbnails)
+  // -------------------------------------------------------------------------
+  // Extracts the 11-char video id from any YouTube URL shape
+  // (watch?v=, youtu.be/, shorts/, embed/, live/, music.youtube.com).
+  function youTubeIdFrom(url) {
+    var s = String(url || "")
+    if (s.length === 0) return ""
+    var m = s.match(/[?&]v=([A-Za-z0-9_-]{6,})/)
+    if (m) return m[1]
+    m = s.match(/youtu\.be\/([A-Za-z0-9_-]{6,})/)
+    if (m) return m[1]
+    m = s.match(/youtube\.com\/(?:shorts|embed|live|v)\/([A-Za-z0-9_-]{6,})/)
+    if (m) return m[1]
+    return ""
+  }
+
+  // Cover art for the active player:
+  // 1. the player's own MPRIS artwork (Spotify, local players, data: URIs),
+  // 2. a YouTube page URL converted into its native thumbnail,
+  // 3. nothing (the notch falls back to a music glyph).
+  function resolveMediaArt(p) {
+    if (!p) return ""
+    var art = String(p.trackArtUrl || "").trim()
+
+    // Some browsers publish the page URL as "artwork": map it to the real thumbnail
+    var ytId = root.youTubeIdFrom(art)
+    if (ytId.length > 0) return "https://i.ytimg.com/vi/" + ytId + "/hqdefault.jpg"
+    if (art.length > 0) return art
+
+    // Browsers that expose no artwork still expose the media/page URL
+    var meta = p.metadata || ({})
+    var pageUrl = String(meta["xesam:url"] || "")
+    ytId = root.youTubeIdFrom(pageUrl)
+    if (ytId.length > 0) return "https://i.ytimg.com/vi/" + ytId + "/hqdefault.jpg"
+
+    return ""
   }
 
   // -------------------------------------------------------------
@@ -153,8 +193,48 @@ Item {
     return false
   }
 
+  // -------------------------------------------------------------------------
+  // Sticky player selection
+  // The player the user last started (or resumed) keeps the island controls even
+  // while it is paused. Without this, a second player still playing in the
+  // background (e.g. Spotify) steals the Play button and resumes the wrong app.
+  // -------------------------------------------------------------------------
+  property string stickyPlayerName: ""
+
+  function playerKey(p) {
+    return p ? String(p.dbusName || p.identity || "") : ""
+  }
+
+  function findStickyPlayer(players) {
+    if (root.stickyPlayerName.length === 0) return null
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i]
+      if (p && !root.isCallOrComm(p) && root.playerKey(p) === root.stickyPlayerName) return p
+    }
+    return null
+  }
+
+  // Drops a stale sticky reference and adopts a playing player when none is set
+  function refreshStickyPlayer() {
+    var players = Mpris.players ? Mpris.players.values : []
+    if (root.stickyPlayerName.length > 0 && root.findStickyPlayer(players)) return
+    root.stickyPlayerName = ""
+    for (var i = 0; i < players.length; i++) {
+      var p = players[i]
+      if (p && p.isPlaying && !root.isCallOrComm(p)) {
+        root.stickyPlayerName = root.playerKey(p)
+        return
+      }
+    }
+  }
+
   function getActivePlayer() {
     var players = Mpris.players ? Mpris.players.values : []
+    // 0. The last player the user played keeps the controls (paused included)
+    var sticky = root.findStickyPlayer(players)
+    if (sticky && (sticky.trackTitle || sticky.trackArtist || sticky.canGoNext || sticky.canGoPrevious)) {
+      return sticky
+    }
     // 1. Any player actively playing with track metadata or skip capabilities (non-call)
     for (var i = 0; i < players.length; i++) {
       var p = players[i]
@@ -199,8 +279,14 @@ Item {
     delegate: Connections {
       required property var modelData
       target: modelData
-      function onIsPlayingChanged() { root.activePlayerChanged() }
+      function onIsPlayingChanged() {
+        // Whoever just started playing becomes the sticky target of the island
+        if (modelData && modelData.isPlaying) root.stickyPlayerName = root.playerKey(modelData)
+        root.activePlayerChanged()
+      }
       function onTrackTitleChanged() { root.activePlayerChanged() }
+      function onTrackArtUrlChanged() { root.activePlayerChanged() }
+      function onMetadataChanged() { root.activePlayerChanged() }
       function onCanGoNextChanged() { root.activePlayerChanged() }
       function onCanGoPreviousChanged() { root.activePlayerChanged() }
     }
@@ -208,7 +294,10 @@ Item {
 
   Connections {
     target: Mpris.players
-    function onValuesChanged() { root.activePlayerChanged() }
+    function onValuesChanged() {
+      root.refreshStickyPlayer()
+      root.activePlayerChanged()
+    }
   }
 
   // Fixed Top Edge Trigger Strip: stays at y=0 so cursor touching top border wakes retracted notch immediately
@@ -243,17 +332,21 @@ Item {
 
     // The island only morphs open when there is actual media to control and no notification active;
     // status toggles now live in the bottom-right control center notch.
-    readonly property bool isHovered: isPointerOver && root.hasActualMedia && dynamicView.showVisualizer && root.notificationProgress < 0.01
+    // Driven by the loaded track (not the live audio energy) so a paused track keeps its
+    // controls on screen and can be resumed from the same notch.
+    readonly property bool isHovered: isPointerOver && root.hasActualMedia && root.notificationProgress < 0.01
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
     // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
     // or when an active notification is received ("come in show the notif and then move out")
-    // NEVER retracts while a call is active — stays visible until the call ends!
+    // NEVER retracts while a call is active or a track is actively playing — stays pinned
+    // above every window (exactly like the call view) until the call / playback ends!
     readonly property bool shouldRetract: root.hasOpenApps
       && !isPointerOver
       && !root.hasNotification
       && !root.inCall
+      && !dynamicView.mprisPlaying
       && root.notificationProgress < 0.01
       && islandContainer.hoverProgress < 0.05
     readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
@@ -286,15 +379,15 @@ Item {
       }
     }
 
-    // iOS Fluid Motion driver value: 0.0 (Clock View) -> 1.0 (Audio Waveform)
-    readonly property real targetProgress: (dynamicView.showVisualizer && root.hasActualMedia) ? 1.0 : 0.0
+    // iOS Fluid Motion driver value: 0.0 (Clock View) -> 1.0 (Audio Waveform / cover art)
+    readonly property real targetProgress: root.hasActualMedia ? 1.0 : 0.0
     property real transitionProgress: targetProgress
 
     Behavior on transitionProgress {
       NumberAnimation {
-        duration: (dynamicView.showVisualizer && root.hasActualMedia) ? 380 : 220
-        easing.type: (dynamicView.showVisualizer && root.hasActualMedia) ? Easing.OutBack : Easing.OutCubic
-        easing.overshoot: (dynamicView.showVisualizer && root.hasActualMedia) ? 1.15 : 1.0
+        duration: root.hasActualMedia ? 380 : 220
+        easing.type: root.hasActualMedia ? Easing.OutBack : Easing.OutCubic
+        easing.overshoot: root.hasActualMedia ? 1.15 : 1.0
       }
     }
 
@@ -307,8 +400,8 @@ Item {
       + (activeExpansionProgress * (root.frameConfig.islandExpandedBottomCornerRadius - root.bottomCornerRadius))
 
     // Height expansion delta: taller when idle (+42px down to 79px) to fit 48px circles,
-    // and sleek when media is playing (+24px down to 61px) to fit 44px media controls
-    readonly property real activeHoverHeightDelta: (dynamicView.showVisualizer && root.hasActualMedia)
+    // and sleek when media is loaded (+24px down to 61px) to fit 44px media controls
+    readonly property real activeHoverHeightDelta: root.hasActualMedia
       ? root.frameConfig.islandHoverHeightDeltaMedia
       : root.frameConfig.islandHoverHeightDeltaIdle
 
@@ -370,7 +463,7 @@ Item {
 
     TapHandler {
       id: tapHandler
-      enabled: !islandContainer.isHovered && !dynamicView.showVisualizer && root.notificationProgress < 0.01
+      enabled: !islandContainer.isHovered && !root.hasActualMedia && root.notificationProgress < 0.01
       onTapped: {
         root.use24Hour = !root.use24Hour
         root.updateClock()
@@ -539,6 +632,7 @@ Item {
     DynamicWorkspaceView {
       id: dynamicView
       anchors.fill: parent
+      artUrl: (root.hasActualMedia && root.activePlayer) ? root.resolveMediaArt(root.activePlayer) : ""
 
       opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
         ? Math.min(1.0, Math.max(0.0, (islandContainer.transitionProgress - 0.25) * 1.33))
@@ -563,11 +657,11 @@ Item {
       anchors.centerIn: parent
       anchors.verticalCenterOffset: root.borderThickness * 0.5
       spacing: 18
-      opacity: (islandContainer.hoverProgress > 0.15 && dynamicView.showVisualizer && root.hasActualMedia && root.notificationProgress < 0.01)
+      opacity: (islandContainer.hoverProgress > 0.15 && root.hasActualMedia && root.notificationProgress < 0.01)
         ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
         : 0.0
       scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && dynamicView.showVisualizer && root.hasActualMedia && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && root.hasActualMedia && root.notificationProgress < 0.01
       transformOrigin: Item.Center
 
       // 1. Skip Previous Track (Shown only for videos/songs, hidden on calls)
@@ -609,9 +703,9 @@ Item {
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            if (root.activePlayer && root.activePlayer.canGoPrevious) {
-              root.activePlayer.previous()
-            }
+            var p = root.activePlayer
+            if (!p) return
+            if (p.canGoPrevious || p.canControl) p.previous()
           }
         }
       }
@@ -658,14 +752,16 @@ Item {
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            if (root.activePlayer) {
-              if (root.activePlayer.canTogglePlaying) {
-                root.activePlayer.togglePlaying()
-              } else if (root.activePlayer.isPlaying && root.activePlayer.canPause) {
-                root.activePlayer.pause()
-              } else if (root.activePlayer.canPlay) {
-                root.activePlayer.play()
-              }
+            var p = root.activePlayer
+            if (!p) return
+            // Explicit play/pause by state is the only reliable path on MPRIS players that
+            // implement Pause but refuse Resume through PlayPause (Spotify).
+            if (p.isPlaying) {
+              if (p.canPause) p.pause()
+              else if (p.canTogglePlaying) p.togglePlaying()
+            } else {
+              if (p.canPlay) p.play()
+              else if (p.canTogglePlaying) p.togglePlaying()
             }
           }
         }
@@ -710,9 +806,9 @@ Item {
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
           onClicked: {
-            if (root.activePlayer && root.activePlayer.canGoNext) {
-              root.activePlayer.next()
-            }
+            var p = root.activePlayer
+            if (!p) return
+            if (p.canGoNext || p.canControl) p.next()
           }
         }
       }

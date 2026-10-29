@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import Quickshell
 import Quickshell.Io
 import Quickshell.Services.Mpris
@@ -10,6 +11,9 @@ Item {
   // Media Playback State
   property bool mprisPlaying: false
   property bool nonMprisPlaying: false
+
+  // Track artwork (file://, /path, or https from MPRIS) for the circular cover
+  property string artUrl: ""
 
   // Filter out calls, communication streams, and players without track metadata
   function isCallOrComm(p) {
@@ -123,14 +127,113 @@ Item {
     root.triggerSinkCheck()
   }
 
-  // --- Dynamic Waveform Centered in Island ---
-  MediaWaveform {
-    id: waveform
+  // --- Compact media row: circular album art (left) + live waveform (center) ---
+  Row {
+    id: compactRow
     anchors.centerIn: parent
-    active: root.showVisualizer
-    barCount: 18
-    barWidth: 3.5
-    barSpacing: 3.5
-    maxHeight: 18
+    spacing: 12
+
+    // Circular album cover, styled exactly like the call view PFP
+    Item {
+      id: artSlot
+      width: 24
+      height: 24
+      anchors.verticalCenter: parent.verticalCenter
+      visible: root.artUrl.length > 0
+
+      // Some players (Chromium / YouTube) publish a temporary artwork path a beat
+      // before the file is written, so a failed decode is retried a few times
+      // instead of leaving the glyph fallback up for the whole track.
+      property string artSource: root.artUrl
+      property int retriesLeft: 10
+
+      Connections {
+        target: root
+        function onArtUrlChanged() {
+          artSlot.artSource = root.artUrl
+          artSlot.retriesLeft = 10
+          artRetryTimer.stop()
+        }
+      }
+
+      Timer {
+        id: artRetryTimer
+        interval: 250
+        repeat: false
+        onTriggered: {
+          var u = root.artUrl
+          artSlot.artSource = ""
+          Qt.callLater(function() { artSlot.artSource = u })
+        }
+      }
+
+      // Subtle translucent circular background disc
+      Rectangle {
+        anchors.fill: parent
+        radius: width / 2
+        color: Qt.rgba(1, 1, 1, 0.16)
+      }
+
+      // Shader-masked cover: guarantees 100% circular clipping
+      Image {
+        id: artImage
+        anchors.fill: parent
+        source: artSlot.visible ? artSlot.artSource : ""
+        fillMode: Image.PreserveAspectCrop
+        sourceSize.width: 48
+        sourceSize.height: 48
+        mipmap: true
+        smooth: true
+        asynchronous: true
+        visible: status === Image.Ready
+        layer.enabled: true
+        layer.effect: MultiEffect {
+          maskEnabled: true
+          maskSource: artMask
+          maskThresholdMin: 0.5
+          maskSpreadAtMin: 0.5
+        }
+
+        onStatusChanged: {
+          if (status === Image.Error && artSlot.retriesLeft > 0) {
+            artSlot.retriesLeft--
+            artRetryTimer.restart()
+          }
+        }
+      }
+
+      Item {
+        id: artMask
+        anchors.fill: parent
+        visible: false
+        layer.enabled: true
+        Rectangle {
+          anchors.fill: parent
+          radius: width / 2
+          color: "#000000"
+        }
+      }
+
+      // Fallback glyph while artwork is loading or missing
+      Text {
+        anchors.centerIn: parent
+        visible: artImage.status !== Image.Ready
+        text: "\u{F03C6}" // nf-md-music_note
+        font.family: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
+        font.pixelSize: 12
+        color: "#ffffff"
+        renderType: Text.NativeRendering
+      }
+    }
+
+    MediaWaveform {
+      id: waveform
+      anchors.verticalCenter: parent.verticalCenter
+      active: root.showVisualizer
+      barCount: 18
+      barWidth: 3.5
+      barSpacing: 3.5
+      maxHeight: 18
+    }
   }
 }
