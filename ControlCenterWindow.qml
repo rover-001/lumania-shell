@@ -14,6 +14,7 @@ Item {
   property bool fullscreen: false
   property bool barHidden: false
   property bool hasOpenApps: false
+  property var notificationManager: null
 
   // Bottom-Right Control Menu State & IPC Controller
   property bool controlOpen: false
@@ -113,6 +114,7 @@ Item {
           borderThickness: root.borderThickness
           notchColor: root.notchColor
           hasOpenApps: root.hasOpenApps
+          notificationManager: root.notificationManager
           isOpen: root.controlOpen
 
           onOpenRequested: root.openControl()

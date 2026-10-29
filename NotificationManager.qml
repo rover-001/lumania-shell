@@ -21,6 +21,20 @@ Item {
   // Pointer hover state (pauses auto-dismiss timer while user is inspecting)
   property bool isHovered: false
 
+  // Focus / Do Not Disturb: suppress popups (critical urgency still passes)
+  property bool dnd: false
+
+  // Per-sender avatar files (/tmp/lumania-avatars) so repeat messages from the same
+  // person keep their picture when the sender omits it, and calls can reuse it.
+  readonly property string avatarDir: "/tmp/lumania-avatars"
+  property var savedAvatars: ({})
+
+  function senderKey(app, summary) {
+    var a = String(app || "").toLowerCase().replace(/[^a-z0-9]+/g, "")
+    var n = String(summary || "").toLowerCase().replace(/\s*\(.*$/, "").replace(/[^a-z0-9]+/g, "")
+    return a + "__" + n
+  }
+
   // Queue for multiple incoming notifications
   property var notificationQueue: []
 
@@ -131,6 +145,7 @@ Item {
 
   function handleIncoming(notification) {
     if (!notification) return
+    if (root.dnd && notification.urgency !== 2) return
     notification.tracked = true
 
     var rawSummary = cleanText(notification.summary)
@@ -161,6 +176,12 @@ Item {
       }
     } catch (e) {
       console.warn("Notification hint parsing error:", e)
+    }
+
+    // Same sender, no picture this time: reuse the one we saved earlier
+    if (!image) {
+      var known = root.savedAvatars[root.senderKey(appName, rawSummary)]
+      if (known) image = known
     }
 
     // Default duration: 5000ms. Senders specifying expireTimeout are respected within 3-12s

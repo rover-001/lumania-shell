@@ -206,6 +206,7 @@ Item {
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
     hasOpenApps: root.hasOpenApps
+    notificationManager: notificationManager
   }
 
   // Forward control menu convenience methods

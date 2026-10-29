@@ -369,7 +369,8 @@ Item {
   // Night Light / Focus (DND) / Screen Recording Toggles
   // -------------------------------------------------------------------------
   property bool nightLightActive: false
-  property bool focusActive: false
+  property var notificationManager: null
+  readonly property bool focusActive: Boolean(notificationManager && notificationManager.dnd)
   property bool recordingActive: false
 
   Process {
@@ -398,30 +399,10 @@ Item {
     nightLightToggleProc.running = true
   }
 
-  Process {
-    id: focusProbe
-    command: ["sh", "-c", "omarchy-shell notifications dndState 2>/dev/null || echo off"]
-    stdout: StdioCollector {
-      onStreamFinished: {
-        var str = String(text || "").trim()
-        root.focusActive = (str === "on")
-      }
-    }
-  }
-
-  Process {
-    id: focusToggleProc
-    command: ["sh", "-c", "omarchy-shell notifications toggleDnd 2>/dev/null"]
-    onExited: root.refreshFocus()
-  }
-
-  function refreshFocus() {
-    if (!focusProbe.running) focusProbe.running = true
-  }
+  function refreshFocus() {}
 
   function toggleFocus() {
-    root.focusActive = !root.focusActive
-    focusToggleProc.running = true
+    if (root.notificationManager) root.notificationManager.dnd = !root.notificationManager.dnd
   }
 
   Process {

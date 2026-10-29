@@ -25,6 +25,61 @@ Item {
   readonly property bool hasNotification: Boolean(notificationManager && notificationManager.hasNotification)
   property real notificationProgress: hasNotification ? 1.0 : 0.0
 
+  // -------------------------------------------------------------------------
+  // Persist a notification's sender picture so repeat messages / calls can reuse it
+  function saveAvatar(img) {
+    var nm = root.notificationManager
+    if (!nm || String(img.source).indexOf("image://") !== 0) return
+    var key = nm.senderKey(nm.currentAppName, nm.currentSummary)
+    var path = nm.avatarDir + "/" + key + ".png"
+    Quickshell.execDetached(["mkdir", "-p", nm.avatarDir])
+    img.grabToImage(function(result) {
+      if (result.saveToFile(path)) {
+        var m = nm.savedAvatars
+        m[key] = path
+        nm.savedAvatars = m
+      }
+    }, Qt.size(96, 96))
+  }
+
+  // Active Voice Call Engine (Discord, WhatsApp, Telegram, WebRTC)
+  // -------------------------------------------------------------------------
+  property bool inCall: false
+  property string callApp: ""
+  property string callCaller: ""
+  property string callAvatar: ""
+  // Call view yields the island to an incoming notification, then returns
+  readonly property bool callShowing: inCall && !hasNotification
+
+  Process {
+    id: callStatusProc
+    command: ["/home/rover/.local/bin/lumania-call-status"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var str = String(text || "").trim()
+        if (str.length > 0) {
+          try {
+            var data = JSON.parse(str)
+            root.inCall = Boolean(data.inCall)
+            root.callApp = String(data.app || "")
+            root.callCaller = String(data.caller || "")
+            root.callAvatar = String(data.avatar || "")
+          } catch(e) {}
+        }
+      }
+    }
+  }
+
+  Timer {
+    id: callPollTimer
+    interval: root.inCall ? 1000 : 2000
+    running: true
+    repeat: true
+    onTriggered: {
+      if (!callStatusProc.running) callStatusProc.running = true
+    }
+  }
+
   Behavior on notificationProgress {
     NumberAnimation {
       duration: root.hasNotification ? 380 : 260
@@ -70,6 +125,7 @@ Item {
 
   Component.onCompleted: {
     updateClock()
+    if (!callStatusProc.running) callStatusProc.running = true
   }
 
   Timer {
@@ -193,9 +249,11 @@ Item {
 
     // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
     // or when an active notification is received ("come in show the notif and then move out")
+    // NEVER retracts while a call is active — stays visible until the call ends!
     readonly property bool shouldRetract: root.hasOpenApps
       && !isPointerOver
       && !root.hasNotification
+      && !root.inCall
       && root.notificationProgress < 0.01
       && islandContainer.hoverProgress < 0.05
     readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
@@ -277,13 +335,15 @@ Item {
     readonly property real notifHeightDelta: 18
 
     // Authentic iOS liquid stretch:
-    // Pill widens dynamically based on active notification size, with liquid volume pulse during transitions
-    width: root.islandWidth
+    // Pill widens dynamically based on active call, notification size, or hover
+    readonly property real normalWidth: root.islandWidth
       + (hoverProgress * root.frameConfig.islandHoverWidthDelta)
       + (root.notificationProgress * animatedNotifWidthDelta)
       + (Math.sin(Math.min(1.0, Math.max(0.0, transitionProgress)) * Math.PI) * 8.0)
       + (Math.sin(Math.min(1.0, Math.max(0.0, hoverProgress)) * Math.PI) * 6.0)
       + (Math.sin(Math.min(1.0, Math.max(0.0, root.notificationProgress)) * Math.PI) * 10.0)
+
+    width: root.callShowing ? 206 : normalWidth
 
     // Height expands downwards on hover (+42px idle, +24px media) or notification (+18px)
     height: root.islandHeight
@@ -427,12 +487,12 @@ Item {
       anchors.verticalCenterOffset: -5.0 * islandContainer.transitionProgress
       spacing: 8
 
-      // Transitions out when audio starts, when hovered/opened, or when notification is active
-      opacity: (!islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
+      // Transitions out when audio starts, when in call, when hovered/opened, or when notification is active
+      opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
         ? Math.max(0.0, 1.0 - islandContainer.transitionProgress * 2.2)
         : 0.0
       scale: Math.max(0.82, 1.0 - islandContainer.transitionProgress * 0.16)
-      visible: opacity > 0.01 && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && !root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01
       transformOrigin: Item.Center
 
       Behavior on opacity {
@@ -480,12 +540,12 @@ Item {
       id: dynamicView
       anchors.fill: parent
 
-      opacity: (!islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
+      opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
         ? Math.min(1.0, Math.max(0.0, (islandContainer.transitionProgress - 0.25) * 1.33))
         : 0.0
       scale: 0.82 + (0.18 * islandContainer.transitionProgress)
       y: 4.0 * (1.0 - islandContainer.transitionProgress)
-      visible: opacity > 0.01 && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && !root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01
       transformOrigin: Item.Center
 
       Behavior on opacity {
@@ -737,6 +797,7 @@ Item {
               fillMode: Image.PreserveAspectCrop
               mipmap: true
               smooth: true
+              onStatusChanged: if (status === Image.Ready) root.saveAvatar(notifImg)
             }
 
             // 1b. App icon from theme (centered 20x20)
@@ -825,6 +886,137 @@ Item {
             if (root.notificationManager) root.notificationManager.dismissCurrent()
           } else {
             if (root.notificationManager) root.notificationManager.invokeAction()
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // Content Layer 5: Active Call View (PFP on left, Waveform in center, Cut on right)
+    // =========================================================================
+    Row {
+      id: callContentRow
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.borderThickness / 2
+      spacing: 12
+      visible: opacity > 0.01
+      opacity: root.callShowing ? 1.0 : 0.0
+
+      Behavior on opacity {
+        NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+      }
+
+      // Left: Profile Picture (PFP) with circular clipping and active call indicator
+      Item {
+        width: 24
+        height: 24
+        anchors.verticalCenter: parent.verticalCenter
+
+        Rectangle {
+          anchors.fill: parent
+          radius: width / 2
+          color: Qt.rgba(255, 255, 255, 0.16)
+        }
+
+        Image {
+          id: callAvatarImg
+          anchors.fill: parent
+          source: (root.callAvatar && root.callAvatar.length > 0) ? ("file://" + root.callAvatar) : ""
+          fillMode: Image.PreserveAspectCrop
+          mipmap: true
+          smooth: true
+          visible: status === Image.Ready
+          cache: false
+          layer.enabled: true
+          layer.effect: MultiEffect {
+            maskEnabled: true
+            maskSource: callAvatarMask
+            maskThresholdMin: 0.5
+            maskSpreadAtMin: 0.5
+          }
+        }
+
+        Item {
+          id: callAvatarMask
+          anchors.fill: parent
+          visible: false
+          layer.enabled: true
+          Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "#000000"
+          }
+        }
+
+        // Fallback icon if no pfp image is found
+        Text {
+          anchors.centerIn: parent
+          visible: callAvatarImg.status !== Image.Ready
+          text: root.callApp === "discord" ? "\uF392" : (root.callApp === "whatsapp" ? "\uF232" : "\uF095")
+          font.family: root.iconFont
+          font.pixelSize: 13
+          color: "#ffffff"
+        }
+
+        // Green active call dot
+        Rectangle {
+          width: 7
+          height: 7
+          radius: 3.5
+          color: "#23a55a"
+          border.color: root.islandColor
+          border.width: 1.5
+          anchors.bottom: parent.bottom
+          anchors.right: parent.right
+        }
+      }
+
+      // Center: The animated waveform visualizer
+      MediaWaveform {
+        id: callWaveform
+        anchors.verticalCenter: parent.verticalCenter
+        active: root.inCall
+        barCount: 16
+        barWidth: 3.0
+        barSpacing: 3.0
+        maxHeight: 16
+        minHeight: 2.0
+      }
+
+      // Right: Tactile End / Cut Call Button
+      Rectangle {
+        id: cutBtn
+        width: 24
+        height: 24
+        radius: 12
+        anchors.verticalCenter: parent.verticalCenter
+        color: "transparent"
+
+        scale: cutTap.pressed ? 0.90 : (cutHover.hovered ? 1.08 : 1.0)
+        Behavior on scale {
+          NumberAnimation { duration: 160; easing.type: Easing.OutBack; easing.overshoot: 1.15 }
+        }
+        Behavior on color { ColorAnimation { duration: 150 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "\u{F03F6}" // nf-md-phone_hangup
+          font.family: root.iconFont
+          font.pixelSize: 20
+          color: cutHover.hovered ? Qt.rgba(1, 1, 1, 0.75) : "#ffffff"
+          renderType: Text.NativeRendering
+        }
+
+        HoverHandler {
+          id: cutHover
+          cursorShape: Qt.PointingHandCursor
+        }
+
+        TapHandler {
+          id: cutTap
+          onTapped: {
+            Quickshell.execDetached(["/home/rover/.local/bin/lumania-call-cut"])
+            root.inCall = false
           }
         }
       }

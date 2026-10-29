@@ -47,9 +47,10 @@ Item {
     }
   }
 
-  // Periodic watch fallback for wallpaper switches (inotify is primary)
+  // Wallpaper switches replace the symlink (new inode), which the FileView inotify
+  // watch does not see; this fast poll is the real trigger (cached run is ~2ms)
   Timer {
-    interval: 4000
+    interval: 250
     repeat: true
     running: root.frameConfig ? root.frameConfig.dynamicWallpaperColor : false
     onTriggered: {
