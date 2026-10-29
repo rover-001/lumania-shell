@@ -91,7 +91,17 @@ Item {
         root.activeWorkspaceName = String(Hyprland.focusedWorkspace.name)
       }
     }
-    if (!wsProbe.running) wsProbe.running = true
+    if (!wsThrottle.running) wsThrottle.start()
+  }
+
+  // Coalesces Hyprland event bursts into at most one hyprctl probe per window
+  Timer {
+    id: wsThrottle
+    interval: 200
+    repeat: false
+    onTriggered: {
+      if (!wsProbe.running) wsProbe.running = true
+    }
   }
 
   Connections {

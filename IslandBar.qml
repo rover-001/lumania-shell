@@ -48,19 +48,42 @@ Item {
         }
       }
     }
+    onExited: {
+      if (root.workspaceSyncPending) root.syncWorkspaceState()
+    }
   }
 
+  // A request that arrives while the probe is in flight is replayed on exit, never dropped
+  property bool workspaceSyncPending: false
+
   function syncWorkspaceState() {
-    if (!workspaceStateProbe.running) workspaceStateProbe.running = true
+    if (workspaceStateProbe.running) {
+      root.workspaceSyncPending = true
+      return
+    }
+    root.workspaceSyncPending = false
+    workspaceStateProbe.running = true
+  }
+
+  // Coalesces Hyprland event bursts (title churn while streaming) into at most one probe per window
+  Timer {
+    id: workspaceSyncThrottle
+    interval: 200
+    repeat: false
+    onTriggered: root.syncWorkspaceState()
+  }
+
+  function requestWorkspaceSync() {
+    if (!workspaceSyncThrottle.running) workspaceSyncThrottle.start()
   }
 
   Component.onCompleted: {
     root.syncWorkspaceState()
   }
 
-  // Fast periodic check ensuring immediate recovery on empty workspaces
+  // Slow safety-net poll; Hyprland events drive the fast path
   Timer {
-    interval: 350
+    interval: 1500
     running: true
     repeat: true
     onTriggered: root.syncWorkspaceState()
@@ -69,10 +92,10 @@ Item {
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      root.syncWorkspaceState()
+      root.requestWorkspaceSync()
     }
     function onFocusedWorkspaceChanged() {
-      root.syncWorkspaceState()
+      root.requestWorkspaceSync()
     }
   }
   property int borderThickness: frameConfig.borderThickness

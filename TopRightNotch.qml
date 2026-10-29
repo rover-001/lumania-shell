@@ -164,10 +164,20 @@ Item {
         }
       }
     }
+    onExited: {
+      if (root.bgAppsSyncPending) root.syncBackgroundApps()
+    }
   }
 
+  property bool bgAppsSyncPending: false
+
   function syncBackgroundApps() {
-    if (!bgAppsProbe.running) bgAppsProbe.running = true
+    if (bgAppsProbe.running) {
+      root.bgAppsSyncPending = true
+      return
+    }
+    root.bgAppsSyncPending = false
+    bgAppsProbe.running = true
   }
 
   Process {
@@ -229,15 +239,23 @@ Item {
     }
   }
 
+  // Coalesces Hyprland event bursts into at most one client probe per window
+  Timer {
+    id: bgAppsThrottle
+    interval: 200
+    repeat: false
+    onTriggered: root.syncBackgroundApps()
+  }
+
   Connections {
     target: Hyprland
     function onRawEvent(event) {
-      root.syncBackgroundApps()
+      if (!bgAppsThrottle.running) bgAppsThrottle.start()
     }
   }
 
   Timer {
-    interval: 800
+    interval: 2000
     running: true
     repeat: true
     onTriggered: {

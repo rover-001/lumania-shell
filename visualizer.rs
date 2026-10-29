@@ -152,7 +152,7 @@ fn main() {
     let mut out_str = String::with_capacity(128);
     let mut out_handle = stdout().lock();
     let mut last_emit = Instant::now();
-    let min_interval = Duration::from_millis(12);
+    let min_interval = Duration::from_millis(16);
 
     loop {
         if reader.read_exact(&mut raw_buf).is_err() {

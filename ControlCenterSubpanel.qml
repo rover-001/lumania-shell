@@ -52,6 +52,17 @@ Item {
     devices: []
   })
   property bool isRescanningWifi: false
+  property var dnsData: ({
+    current: "",
+    preset: "dhcp"
+  })
+
+  readonly property var dnsPresets: [
+    { id: "cloudflare", label: "Cloudflare", desc: "1.1.1.1" },
+    { id: "google", label: "Google", desc: "8.8.8.8" },
+    { id: "adguard", label: "AdGuard", desc: "Ad blocking" },
+    { id: "dhcp", label: "DHCP Default", desc: "Router" }
+  ]
 
   // Reduced motion is owned by the control center (Hyprland global switch).
   property bool reduceMotion: false
@@ -63,6 +74,7 @@ Item {
   signal toggleBluetoothRequested()
   signal connectBluetoothRequested(string mac)
   signal disconnectBluetoothRequested(string mac)
+  signal setDnsRequested(string preset)
 
   function openTab(tab) {
     if (root.activeTab !== tab) root.activeTab = tab
@@ -132,7 +144,7 @@ Item {
   }
   readonly property int activeRowCount: root.activeTab === "wifi"
     ? root.wifiNetworks.length
-    : root.btDevices.length
+    : (root.activeTab === "dns" ? root.dnsPresets.length : root.btDevices.length)
 
   // Height follows the row count so the panel never carries empty space.
   // Critically damped: the mask window must never overshoot past the bounds.
@@ -489,6 +501,87 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: 11
           color: Qt.rgba(255, 255, 255, 0.60)
+        }
+      }
+    }
+
+    // -----------------------------------------------------------------------
+    // DNS resolver presets (same presets as the top island DNS menu)
+    // -----------------------------------------------------------------------
+    ColumnLayout {
+      id: dnsView
+      anchors.fill: parent
+      anchors.leftMargin: 12
+      anchors.rightMargin: cardShape.flareR + 14
+      anchors.topMargin: cardShape.flareR + 8
+      anchors.bottomMargin: cardShape.flareR + 8
+      spacing: 8
+      visible: root.activeTab === "dns"
+
+      Item {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        clip: true
+
+        ListView {
+          id: dnsList
+          anchors.fill: parent
+          spacing: 2
+          boundsBehavior: Flickable.StopAtBounds
+          model: root.dnsPresets
+
+          delegate: Rectangle {
+            id: dnsItem
+            width: dnsList.width
+            height: 28
+            radius: 6
+
+            readonly property bool isSelected: root.dnsData.preset === modelData.id
+
+            color: dnsItem.isSelected
+              ? Qt.rgba(255, 255, 255, 0.24)
+              : (dnsItemHover.hovered ? Qt.rgba(255, 255, 255, 0.15) : "transparent")
+
+            Behavior on color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+            HoverHandler { id: dnsItemHover }
+
+            RowLayout {
+              anchors.fill: parent
+              anchors.leftMargin: 8
+              anchors.rightMargin: 8
+              spacing: 6
+
+              Rectangle {
+                width: 8
+                height: 8
+                radius: 4
+                color: dnsItem.isSelected ? "#ffffff" : Qt.rgba(255, 255, 255, 0.30)
+              }
+
+              Text {
+                text: modelData.label
+                font.family: root.fontFamily
+                font.pixelSize: 11
+                font.weight: dnsItem.isSelected ? Font.DemiBold : Font.Normal
+                color: "#ffffff"
+                elide: Text.ElideRight
+                Layout.fillWidth: true
+              }
+
+              Text {
+                text: modelData.desc
+                font.family: root.fontFamily
+                font.pixelSize: 9
+                color: Qt.rgba(255, 255, 255, 0.65)
+              }
+            }
+
+            TapHandler {
+              id: dnsTap
+              onTapped: root.setDnsRequested(modelData.id)
+            }
+          }
         }
       }
     }

@@ -69,6 +69,14 @@ Item {
     sinkInputCheck.running = true
   }
 
+  // Coalesces bursts of PipeWire events into one sink-input scan per window
+  Timer {
+    id: sinkCheckThrottle
+    interval: 150
+    repeat: false
+    onTriggered: root.triggerSinkCheck()
+  }
+
   // Real-time PipeWire audio event push (sub-millisecond notification on non-MPRIS stream state change)
   Process {
     id: pactlSubscriber
@@ -78,7 +86,7 @@ Item {
       onRead: function(line) {
         var str = String(line || "")
         if (str.indexOf("sink-input") !== -1 || str.indexOf("sink") !== -1) {
-          root.triggerSinkCheck()
+          if (!sinkCheckThrottle.running) sinkCheckThrottle.start()
         }
       }
     }
@@ -100,7 +108,7 @@ Item {
 
   // Fast fallback polling for non-MPRIS audio
   Timer {
-    interval: root.nonMprisPlaying ? 300 : 1000
+    interval: root.nonMprisPlaying ? 1500 : 2500
     running: true
     repeat: true
     onTriggered: {

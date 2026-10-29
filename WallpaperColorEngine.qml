@@ -47,9 +47,9 @@ Item {
     }
   }
 
-  // Periodic watch fallback for wallpaper switches (fast 800ms heartbeat)
+  // Periodic watch fallback for wallpaper switches (inotify is primary)
   Timer {
-    interval: 800
+    interval: 4000
     repeat: true
     running: root.frameConfig ? root.frameConfig.dynamicWallpaperColor : false
     onTriggered: {

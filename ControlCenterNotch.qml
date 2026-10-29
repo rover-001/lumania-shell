@@ -207,6 +207,11 @@ Item {
     plugged: false
   })
 
+  property var dnsData: ({
+    current: "",
+    preset: "dhcp"
+  })
+
   property bool isRescanningWifi: false
   property double lastBtScan: 0
   property string debugTab: ""
@@ -222,6 +227,7 @@ Item {
             var data = JSON.parse(str)
             if (data.wifi) root.wifiData = data.wifi
             if (data.bluetooth) root.btData = data.bluetooth
+            if (data.dns) root.dnsData = data.dns
             if (data.battery) root.batteryData = data.battery
             root.isRescanningWifi = false
           } catch (e) {}
@@ -252,6 +258,12 @@ Item {
   function toggleBluetooth() {
     root.btData.enabled = !root.btData.enabled
     runStatusAction(["--toggle-bt", root.btData.enabled ? "on" : "off"])
+  }
+
+  function setDns(preset) {
+    if (!preset) return
+    root.dnsData = Object.assign({}, root.dnsData, { preset: preset })
+    runStatusAction(["--set-dns", preset])
   }
 
   function rescanWifi() {
@@ -310,6 +322,7 @@ Item {
     var sp = cardProbe.point.scenePosition
     var wp = btnWifi.mapFromItem(null, sp.x, sp.y)
     var bp = btnBluetooth.mapFromItem(null, sp.x, sp.y)
+    var dp = btnDns.mapFromItem(null, sp.x, sp.y)
 
     if (wp.x >= 0 && wp.x <= btnWifi.width && wp.y >= 0 && wp.y <= btnWifi.height) {
       showStatusTab("wifi")
@@ -317,6 +330,10 @@ Item {
     }
     if (bp.x >= 0 && bp.x <= btnBluetooth.width && bp.y >= 0 && bp.y <= btnBluetooth.height) {
       showStatusTab("bluetooth")
+      return
+    }
+    if (dp.x >= 0 && dp.x <= btnDns.width && dp.y >= 0 && dp.y <= btnDns.height) {
+      showStatusTab("dns")
       return
     }
 
@@ -941,9 +958,10 @@ Item {
       Column {
         id: controlsColumn
         anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: root.borderThickness / 2
         anchors.horizontalCenter: parent.horizontalCenter
-        spacing: 12
+        // Visible body is flush to the right screen corner and inset by the left flare: centre on the body
+        anchors.horizontalCenterOffset: frameConfig.controlExpandedFlareRadius / 2
+        spacing: 14
 
         // Top Section: 2 Rows x 3 Columns (Row 1 & Row 2)
         // Col 1: Wi-Fi & Bluetooth (46px)
@@ -1351,9 +1369,56 @@ Item {
         Row {
           id: rowActionAndPower
           anchors.horizontalCenter: parent.horizontalCenter
-          spacing: Math.round((272 - (frameConfig.controlButtonSize * 4)) / 3)
+          spacing: Math.floor((272 - (frameConfig.controlButtonSize * 5)) / 4)
 
-          // 5. Screen Record toggle
+          // 5. DNS resolver (opens the DNS preset menu)
+          Rectangle {
+            id: btnDns
+            width: frameConfig.controlButtonSize
+            height: frameConfig.controlButtonSize
+            radius: width / 2
+
+            readonly property bool isActive: Boolean(root.dnsData.preset) && root.dnsData.preset !== "dhcp"
+            readonly property bool isPressed: dnsArea.pressed
+
+            FluidSpring {
+              id: dnsPressSpring
+              target: btnDns.isPressed ? 0.90 : (dnsArea.containsMouse ? 1.08 : 1.0)
+              response: btnDns.isPressed ? 0.18 : 0.30
+              dampingFraction: btnDns.isPressed ? 1.0 : 0.78
+              epsilon: 0.0004
+              reduceMotion: root.reduceMotion
+              value: 1.0
+            }
+
+            color: isActive
+              ? frameConfig.powerButtonActiveBg
+              : (dnsArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : frameConfig.powerButtonInactiveBg)
+            scale: dnsPressSpring.value
+
+            Behavior on color { ColorAnimation { duration: 180 } }
+
+            Text {
+              anchors.centerIn: parent
+              text: "󰖟"
+              font.family: root.iconFont
+              font.pixelSize: 22
+              color: btnDns.isActive
+                ? frameConfig.powerButtonActiveIcon
+                : frameConfig.powerButtonInactiveIcon
+              renderType: Text.NativeRendering
+            }
+
+            MouseArea {
+              id: dnsArea
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onContainsMouseChanged: if (containsMouse) root.showStatusTab("dns")
+            }
+          }
+
+          // 6. Screen Record toggle
           Rectangle {
             id: btnRecord
             width: frameConfig.controlButtonSize
@@ -1618,8 +1683,10 @@ Item {
     wifiData: root.wifiData
     btData: root.btData
     isRescanningWifi: root.isRescanningWifi
+    dnsData: root.dnsData
     reduceMotion: root.reduceMotion
 
+    onSetDnsRequested: function(preset) { root.setDns(preset) }
     onToggleWifiRequested: root.toggleWifi()
     onRescanWifiRequested: root.rescanWifi()
     onConnectWifiRequested: function(ssid) { root.connectWifi(ssid) }
