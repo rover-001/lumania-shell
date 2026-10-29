@@ -288,7 +288,7 @@ QtObject {
 
   // ---- HEIGHT (measured above the border band; borderThickness is added) ---
   // Resting lip rise (mirrors the island protrusion)
-  property real wallpaperCollapsedHeight: 15
+  property real wallpaperCollapsedHeight: 10
   // Panel rise when the filmstrip is open
   property real wallpaperExpandedHeight: 118
 

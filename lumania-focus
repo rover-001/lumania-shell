@@ -1,0 +1,57 @@
+#!/usr/bin/env python3
+import sys
+import json
+import subprocess
+import re
+
+def main():
+    if len(sys.argv) < 2:
+        return
+
+    queries = sys.argv[1:]
+    patterns = []
+
+    for q in queries:
+        s = q.strip()
+        if not s:
+            continue
+        patterns.append(s)
+        # Check for domains like web.whatsapp.com or web-discord
+        parts = re.split(r'[\.\-\_\s]+', s)
+        for p in parts:
+            if len(p) >= 3 and p.lower() not in ['web', 'app', 'www', 'com', 'org', 'net', 'io']:
+                patterns.append(p)
+
+    patterns = [p.lower() for p in patterns if len(p) >= 3]
+
+    try:
+        out = subprocess.check_output(['hyprctl', 'clients', '-j']).decode('utf-8')
+        clients = json.loads(out)
+    except Exception:
+        return
+
+    # Sort clients by focus history so most recent window comes first
+    clients.sort(key=lambda c: c.get('focusHistoryID', 999))
+
+    best_address = None
+    for pat in patterns:
+        for c in clients:
+            cls = (c.get('class') or '').lower()
+            icls = (c.get('initialClass') or '').lower()
+            ttl = (c.get('title') or '').lower()
+            ittl = (c.get('initialTitle') or '').lower()
+            if pat in cls or pat in icls or pat in ttl or pat in ittl:
+                best_address = c.get('address')
+                break
+        if best_address:
+            break
+
+    if best_address:
+        cmd = f'hl.dsp.focus({{ window = "address:{best_address}" }})'
+        try:
+            subprocess.run(['hyprctl', 'dispatch', cmd], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            subprocess.run(['hyprctl', 'dispatch', 'focuswindow', f'address:{best_address}'], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+if __name__ == '__main__':
+    main()

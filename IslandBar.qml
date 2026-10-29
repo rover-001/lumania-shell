@@ -134,6 +134,11 @@ Item {
   function openSearch() { searchWindow.openSearch() }
   function closeSearch() { searchWindow.closeSearch() }
 
+  // Dedicated Native Notification Manager for Dynamic Island
+  NotificationManager {
+    id: notificationManager
+  }
+
   // 1. Top Bar Window (Top border line, corners, Dynamic Island notch & subpanel)
   TopBarWindow {
     frameConfig: frameConfig
@@ -145,6 +150,7 @@ Item {
     barHidden: root.barHidden
     fullscreen: root.fullscreenActive
     hasOpenApps: root.hasOpenApps
+    notificationManager: notificationManager
     shell: root.shell
     barWidgetRegistry: root.barWidgetRegistry
     pluginRegistry: root.pluginRegistry
