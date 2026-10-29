@@ -312,21 +312,6 @@ Item {
     Quickshell.execDetached(["gtk-launch", item.id + ".desktop"])
   }
 
-  // -------------------------------------------------------------------------
-  // Power Actions
-  // -------------------------------------------------------------------------
-  readonly property var powerActions: [
-    { glyph: "󰒲", label: "Suspend", command: ["systemctl", "suspend"] },          // zzz
-    { glyph: "󰖔", label: "Hibernate", command: ["systemctl", "hibernate"] },      // moon + stars
-    { glyph: "󰜉", label: "Restart", command: ["systemctl", "reboot"] },           // circular arrow
-    { glyph: "󰐥", label: "Power off", command: ["systemctl", "poweroff"] }        // power
-  ]
-
-  function runPowerAction(command) {
-    if (!command) return
-    root.close()
-    Quickshell.execDetached(command)
-  }
 
   Component.onCompleted: {
     refreshApps()
@@ -1071,98 +1056,6 @@ Item {
               interval: 900
               running: false
               repeat: false
-            }
-          }
-        }
-
-        // Refined Apple HIG Control Bar & Power Dock
-        // Refined Footer with Improved Tactile Power Buttons (Zero text)
-        Item {
-          Layout.fillWidth: true
-          Layout.preferredHeight: frameConfig.searchFooterHeight
-
-          // Hairline divider
-          Rectangle {
-            anchors.top: parent.top
-            anchors.left: parent.left
-            anchors.right: parent.right
-            height: 1
-            color: Qt.rgba(255, 255, 255, 0.10)
-          }
-
-          Row {
-            anchors.left: parent.left
-            anchors.leftMargin: 6
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: 14
-
-            Repeater {
-              model: root.powerActions
-
-              delegate: Item {
-                width: frameConfig.searchPowerButtonSize
-                height: frameConfig.searchPowerButtonSize
-
-                Rectangle {
-                  id: powerButton
-                  anchors.centerIn: parent
-                  width: frameConfig.searchPowerButtonSize
-                  height: frameConfig.searchPowerButtonSize
-                  radius: width / 2
-
-                  readonly property bool isPowerOff: index === 3
-                  readonly property bool isRestart: index === 2
-                  readonly property bool isHibernate: index === 1
-                  readonly property bool isSuspend: index === 0
-
-                  color: {
-                    if (powerTap.pressed) return Qt.rgba(255, 255, 255, 0.35)
-                    if (powerHover.hovered) {
-                      if (isPowerOff) return Qt.rgba(235, 65, 65, 0.38)
-                      if (isRestart) return Qt.rgba(245, 175, 45, 0.35)
-                      if (isHibernate) return Qt.rgba(165, 105, 245, 0.35)
-                      return Qt.rgba(85, 165, 245, 0.35)
-                    }
-                    return frameConfig.powerButtonInactiveBg
-                  }
-
-                  border.color: powerHover.hovered
-                    ? Qt.rgba(255, 255, 255, 0.38)
-                    : Qt.rgba(255, 255, 255, 0.14)
-                  border.width: 1
-
-                  scale: powerTap.pressed ? 0.90 : (powerHover.hovered ? 1.08 : 1.0)
-
-                  Behavior on color { ColorAnimation { duration: 150 } }
-                  Behavior on border.color { ColorAnimation { duration: 150 } }
-                  Behavior on scale {
-                    NumberAnimation {
-                      duration: 160
-                      easing.type: Easing.OutBack
-                      easing.overshoot: 1.15
-                    }
-                  }
-
-                  Text {
-                    anchors.centerIn: parent
-                    text: modelData.glyph
-                    font.family: root.iconFont
-                    font.pixelSize: 19
-                    color: powerHover.hovered ? "#ffffff" : frameConfig.powerButtonInactiveIcon
-                    renderType: Text.NativeRendering
-                  }
-
-                  HoverHandler {
-                    id: powerHover
-                    cursorShape: Qt.PointingHandCursor
-                  }
-
-                  TapHandler {
-                    id: powerTap
-                    onTapped: root.runPowerAction(modelData.command)
-                  }
-                }
-              }
             }
           }
         }

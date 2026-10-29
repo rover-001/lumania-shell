@@ -174,6 +174,19 @@ Item {
     barConfig: root.barConfig
   }
 
+  // 1c. Top-Left Power & Session Notch Window (Twin Dynamic Island on the left)
+  TopLeftWindow {
+    frameConfig: frameConfig
+    borderThickness: root.borderThickness
+    notchColor: root.islandColor
+    textColor: root.islandTextColor
+    mutedColor: root.islandMutedColor
+    fontFamily: root.fontFamily
+    barHidden: root.barHidden
+    fullscreen: root.fullscreenActive
+    hasOpenApps: root.hasOpenApps
+  }
+
   // 2. Screen Frame Borders (Bottom, Left, Right bezel windows and dock margins)
   ScreenFrame {
     frameConfig: frameConfig

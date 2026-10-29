@@ -97,6 +97,24 @@ QtObject {
   property real trayNotchOpenOvershoot: 1.08        // OutBack spring overshoot
 
   // =========================================================================
+  // TOP-LEFT POWER & SESSION NOTCH CONSTANTS (DYNAMIC ISLAND TWIN)
+  // =========================================================================
+  property real powerNotchLeftMargin: 26            // Margin right of top-left corner fillet
+  property real powerNotchBaseHeight: trayNotchBaseHeight // Exact match with top right notch
+  property real powerNotchHoverHeightDelta: trayNotchHoverHeightDelta
+  property real powerNotchTopCurveRadius: trayNotchTopCurveRadius
+  property real powerNotchExpandedTopCurveRadius: trayNotchExpandedTopCurveRadius
+  property real powerNotchBottomCornerRadius: trayNotchBottomCornerRadius
+  property real powerNotchExpandedBottomCornerRadius: trayNotchExpandedBottomCornerRadius
+  property real powerNotchItemSize: 26              // Match 26px itemSize from TopRightNotch
+  property real powerNotchItemRadius: 7             // Match 7px radius from TopRightNotch
+  property real powerNotchItemSpacing: 6            // Spacing between icons
+  property real powerNotchSidePadding: 12           // Horizontal padding inside the notch
+  property int powerNotchOpenDuration: 340          // ms, iOS energetic spring open
+  property int powerNotchCloseDuration: 280         // ms, critically damped settle
+  property real powerNotchOpenOvershoot: 1.08       // OutBack spring overshoot
+
+  // =========================================================================
   // BOTTOM-RIGHT CONTROL CENTER — EDIT SHAPE HERE
   // =========================================================================
   // Mirrors the bottom-left search gusset: a low lip along the BOTTOM border
@@ -215,7 +233,7 @@ QtObject {
   // Finger height: how far the gusset climbs up the left border
   property real searchLeftTabHeight: 100
   // Panel height when the search is open
-  property real searchExpandedHeight: 580
+  property real searchExpandedHeight: 520
 
   // ---- CURVES / RADII -----------------------------------------------------
   // Rounded cap on the finger's free end (0 = square top)
