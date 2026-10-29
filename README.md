@@ -1,8 +1,28 @@
+<div align="center">
+
 # Lumania Shell
 
-A desktop shell for [Omarchy](https://omarchy.org) / Hyprland, built with [Quickshell](https://quickshell.org) (QML) and a few small Rust helpers.
+**A desktop shell for Omarchy / Hyprland, built with Quickshell.**
 
-It replaces the Omarchy bar with a thin frame around your screen plus a set of pop-out panels ("notches") on its edges:
+[![Hyprland](https://img.shields.io/badge/Hyprland-58E1FF?style=for-the-badge&logo=hyprland&logoColor=black)](https://hyprland.org)
+[![Omarchy](https://img.shields.io/badge/Omarchy-1793D1?style=for-the-badge&logo=archlinux&logoColor=white)](https://omarchy.org)
+[![Quickshell](https://img.shields.io/badge/Quickshell-QML-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://quickshell.org)
+[![Rust](https://img.shields.io/badge/Rust-helpers-CE422B?style=for-the-badge&logo=rust&logoColor=white)](#)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)](#license)
+
+<img src="assets/showcase.gif" alt="Lumania Shell showcase" width="100%">
+
+<a href="https://buymeacoffee.com/rover01"><img src="https://img.shields.io/badge/Buy%20me%20a%20coffee-FFDD00?style=for-the-badge&logo=buymeacoffee&logoColor=black" alt="Buy me a coffee"></a>
+
+[Features](#features) · [Getting started](#getting-started) · [Commands](#controlling-it-from-the-terminal) · [Configuration](#configuration)
+
+</div>
+
+---
+
+## Features
+
+Lumania replaces the Omarchy bar with a thin frame around your screen plus a set of pop-out panels ("notches") on its edges:
 
 | Where | File | What it does |
 | --- | --- | --- |
@@ -95,6 +115,12 @@ omarchy-shell lumania.control status wifi   # or bluetooth, audio
 Colors, frame thickness, corner radii and panel sizes live in `FrameConfig.qml`. Set `dynamicWallpaperColor: false` there to use the fixed `borderColor` / `textColor` instead of wallpaper-derived colors.
 
 After editing, run `omarchy restart shell`. If you change a `.rs` file, re-run `./build.sh`.
+
+## Support
+
+If you like Lumania Shell, you can support development here:
+
+<a href="https://buymeacoffee.com/rover01"><img src="https://img.buymeacoffee.com/button-api/?text=Buy%20me%20a%20coffee&emoji=%E2%98%95&slug=rover01&button_colour=FFDD00&font_colour=000000&font_family=Inter&outline_colour=000000&coffee_colour=ffffff" alt="Buy me a coffee" height="45"></a>
 
 ## License
 
