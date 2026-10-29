@@ -71,6 +71,36 @@ Item {
     property var shell: root.shell
     property bool foregroundAnimationEnabled: true
     property var activePopout: null
+    property var clickTargets: []
+    property var layoutConfig: (root.barConfig && root.barConfig.layout) ? root.barConfig.layout : ({})
+
+    function registerClickTarget(target) {
+      if (!target) return
+      if (clickTargets.indexOf(target) === -1) {
+        var copy = clickTargets.slice()
+        copy.push(target)
+        clickTargets = copy
+      }
+    }
+
+    function unregisterClickTarget(target) {
+      if (!target) return
+      var idx = clickTargets.indexOf(target)
+      if (idx !== -1) {
+        var copy = clickTargets.slice()
+        copy.splice(idx, 1)
+        clickTargets = copy
+      }
+    }
+
+    function targetBelongsToWindow(target, window) {
+      if (!target || !window) return false
+      return target.QsWindow && target.QsWindow.window === window
+    }
+
+    function switchPanelFrom(owner, direction) {
+      return false
+    }
 
     function requestPopout(owner) {
       if (activePopout === owner) return
@@ -188,7 +218,7 @@ Item {
     if (!app) return
     var addr = String(app.address || "")
     if (addr) {
-      appFocusProc.exec(["hyprctl", "dispatch", "hl.dsp.focus({ address = '" + addr + "' })"])
+      appFocusProc.exec(["hyprctl", "dispatch", "hl.dsp.focus({ window = 'address:" + addr + "' })"])
     } else {
       appFocusProc.exec(["hyprctl", "dispatch", "hl.dsp.workspace.toggle_special('scratchpad')"])
     }
@@ -780,6 +810,8 @@ Item {
                   mouse.accepted = true
                 } else if (mouse.button === Qt.MiddleButton) {
                   traySlot.modelData.secondaryActivate()
+                } else if (traySlot.modelData.onlyMenu) {
+                  root.openItemMenu(traySlot.modelData, traySlot, mouse)
                 } else {
                   traySlot.modelData.activate()
                 }
@@ -810,12 +842,30 @@ Item {
     ? submenuStack[submenuDepth - 1].opener.children
     : trayMenuOpener.children
 
+  // Prevents accidental re-click on whichever entry lands under the cursor
+  // after a submenu level change (same guard as omarchy's Tray.qml).
+  property bool menuLevelSettling: false
+
   Component {
     id: submenuOpenerComponent
     QsMenuOpener {}
   }
 
+  Timer {
+    id: menuLevelSettleTimer
+    interval: 250
+    onTriggered: root.menuLevelSettling = false
+  }
+
+  function settleMenuLevel() {
+    root.menuLevelSettling = true
+    menuLevelSettleTimer.restart()
+  }
+
   function resetTrayMenu() {
+    root.menuLevelSettling = false
+    menuLevelSettleTimer.stop()
+    trayMenuFlick.contentY = 0
     var openers = submenuStack
     submenuStack = []
     for (var i = openers.length - 1; i >= 0; i--) {
@@ -826,17 +876,21 @@ Item {
   function enterSubmenu(entry, title) {
     var opener = submenuOpenerComponent.createObject(root, { menu: entry })
     if (!opener) return
+    trayMenuFlick.contentY = 0
     var stack = submenuStack.slice()
     stack.push({ opener: opener, title: title })
     submenuStack = stack
+    root.settleMenuLevel()
   }
 
   function leaveSubmenu() {
     if (submenuStack.length === 0) return
+    trayMenuFlick.contentY = 0
     var stack = submenuStack.slice()
     var top = stack.pop()
     submenuStack = stack
     if (top && top.opener) top.opener.destroy()
+    root.settleMenuLevel()
   }
 
   function close() {
@@ -847,15 +901,20 @@ Item {
   function openItemMenu(item, anchor, mouse) {
     if (!item) return
     if (!item.menu) {
-      if (anchor && anchor.QsWindow && anchor.QsWindow.window) {
-        var point = anchor.QsWindow.contentItem.mapFromItem(anchor, mouse.x, mouse.y)
-        item.display(anchor.QsWindow.window, Math.round(point.x), Math.round(point.y))
-      } else if (root.parentWindow && typeof item.display === "function") {
-        var pt = anchor.mapToItem(null, mouse.x, mouse.y)
-        item.display(root.parentWindow, Math.round(pt.x), Math.round(pt.y))
+      // Items without a D-Bus menu use display() (requires UseQApplication —
+      // silently no-ops in standard omarchy shell, same behaviour as Tray.qml)
+      var win = anchor && anchor.QsWindow ? anchor.QsWindow.window : null
+      if (!win) win = root.parentWindow
+      if (win && typeof item.display === "function") {
+        var point = (anchor.QsWindow && anchor.QsWindow.contentItem)
+          ? anchor.QsWindow.contentItem.mapFromItem(anchor, mouse.x, mouse.y)
+          : anchor.mapToItem(null, mouse.x, mouse.y)
+        item.display(win, Math.round(point.x), Math.round(point.y))
       }
       return
     }
+    // Reset before switching items so the old root's children are torn down
+    // before trayMenuOpener.menu binding fires (avoids stale children flash).
     root.resetTrayMenu()
     root.activeTrayItem = item
     root.activeTrayAnchor = anchor
@@ -916,7 +975,11 @@ Item {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: Qt.PointingHandCursor
-          onClicked: root.leaveSubmenu()
+          onClicked: {
+            if (root.menuLevelSettling) return
+            trayMenuFlick.contentY = 0
+            root.leaveSubmenu()
+          }
         }
       }
 
@@ -1004,11 +1067,13 @@ Item {
                 hoverEnabled: true
                 cursorShape: menuRow.modelData.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                 onClicked: {
+                  if (root.menuLevelSettling) return
                   if (!menuRow.modelData.enabled) return
                   if (menuRow.modelData.hasChildren) {
+                    trayMenuFlick.contentY = 0
                     root.enterSubmenu(menuRow.modelData, menuRow.rowText)
                   } else {
-                    menuRow.modelData.trigger()
+                    menuRow.modelData.triggered()
                     root.close()
                   }
                 }
