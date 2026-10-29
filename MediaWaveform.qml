@@ -7,11 +7,45 @@ Item {
   id: root
 
   property bool active: true
+  property bool settling: false
   property int barCount: 18
   property real barWidth: 3.5
   property real barSpacing: 3.5
   property real maxHeight: 18
   property real minHeight: 2.0
+
+  opacity: root.active ? 1.0 : 0.0
+  Behavior on opacity {
+    NumberAnimation { duration: 240; easing.type: Easing.OutCubic }
+  }
+
+  onActiveChanged: {
+    if (!active) {
+      barHeights = []
+      settling = true
+      settleTimer.restart()
+    }
+  }
+
+  Timer {
+    id: settleTimer
+    interval: 320
+    onTriggered: {
+      root.settling = false
+      root.resetHeights()
+    }
+  }
+
+  function resetHeights() {
+    ensureSpringState()
+    var d = []
+    for (var i = 0; i < barCount; i++) {
+      springPos[i] = minHeight
+      springVel[i] = 0
+      d.push(minHeight)
+    }
+    displayHeights = d
+  }
 
   property var barHeights: []
   property var barColors: []
@@ -66,6 +100,7 @@ Item {
   }
 
   function targetFor(i) {
+    if (!root.active) return minHeight
     if (!barHeights || barHeights.length <= i) return minHeight
     var t = Number(barHeights[i])
     if (isNaN(t)) return minHeight
@@ -115,7 +150,7 @@ Item {
   // Per-frame driver, hardware-synchronized with display refresh rate (144 Hz)
   FrameAnimation {
     id: springDriver
-    running: root.active
+    running: root.active || root.settling
     onTriggered: {
       var dt = Math.max(0.001, Math.min(frameTime > 0 ? frameTime : 0.007, 0.033))
       root.stepSprings(dt)

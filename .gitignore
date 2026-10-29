@@ -1,2 +1,6 @@
 *.tmp
 *.log
+.heald
+.heald/
+AGENTS.md
+agents.md

@@ -380,14 +380,15 @@ Item {
     }
 
     // iOS Fluid Motion driver value: 0.0 (Clock View) -> 1.0 (Audio Waveform / cover art)
-    readonly property real targetProgress: root.hasActualMedia ? 1.0 : 0.0
+    readonly property bool isMediaActive: Boolean(root.hasActualMedia && dynamicView.showVisualizer)
+    readonly property real targetProgress: isMediaActive ? 1.0 : 0.0
     property real transitionProgress: targetProgress
 
     Behavior on transitionProgress {
       NumberAnimation {
-        duration: root.hasActualMedia ? 380 : 220
-        easing.type: root.hasActualMedia ? Easing.OutBack : Easing.OutCubic
-        easing.overshoot: root.hasActualMedia ? 1.15 : 1.0
+        duration: islandContainer.isMediaActive ? 380 : 240
+        easing.type: islandContainer.isMediaActive ? Easing.OutBack : Easing.OutCubic
+        easing.overshoot: islandContainer.isMediaActive ? 1.15 : 1.0
       }
     }
 
