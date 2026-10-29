@@ -225,7 +225,7 @@ QtObject {
   // Finger width: the part merged into the left border
   property real searchLeftTabWidth: 10
   // Panel width when the search is open
-  property real searchExpandedWidth: 560
+  property real searchExpandedWidth: 660
 
   // ---- HEIGHT -------------------------------------------------------------
   // Lip rise above the bottom border (keep small for a sleek hairline lip)
@@ -233,7 +233,7 @@ QtObject {
   // Finger height: how far the gusset climbs up the left border
   property real searchLeftTabHeight: 100
   // Panel height when the search is open
-  property real searchExpandedHeight: 520
+  property real searchExpandedHeight: 640
 
   // ---- CURVES / RADII -----------------------------------------------------
   // Rounded cap on the finger's free end (0 = square top)
@@ -271,7 +271,7 @@ QtObject {
   property real searchBarHeight: 46                // Search input height
   property real searchBarRadius: 23                // Search input fully rounded capsule radius
   property int searchGridColumns: 5                // Number of grid columns for applications
-  property real searchGridCellHeight: 92           // Height per app grid cell
+  property real searchGridCellHeight: 86           // Height per app grid cell
   property color searchFieldBg: Qt.rgba(0, 0, 0, 0.28)
   property color searchItemHoverBg: Qt.rgba(255, 255, 255, 0.08)
   property color searchItemActiveBg: Qt.rgba(255, 255, 255, 0.16)

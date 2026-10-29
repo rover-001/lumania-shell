@@ -40,6 +40,10 @@ Item {
   function open() {
     root.requestedOpen = true
     root.openRequested()
+    if (root.shell && root.shell.appLibrary && typeof root.shell.appLibrary.refreshIcons === "function") {
+      root.shell.appLibrary.refreshIcons()
+    }
+    root.loadRecentApps()
     refreshApps()
     Qt.callLater(function() {
       if (searchInput) {
@@ -72,7 +76,14 @@ Item {
 
   onIsOpenEffectiveChanged: {
     if (root.isOpenEffective) {
+      if (root.shell && root.shell.appLibrary && typeof root.shell.appLibrary.refreshIcons === "function") {
+        root.shell.appLibrary.refreshIcons()
+      }
+      root.loadRecentApps()
       refreshApps()
+      if (typeof scrollSpring !== "undefined" && scrollSpring) {
+        scrollSpring.snapTo(0)
+      }
       Qt.callLater(function() {
         if (searchInput) {
           searchInput.forceActiveFocus()
@@ -133,8 +144,139 @@ Item {
   // -------------------------------------------------------------------------
   property var allApps: []
   property var filteredApps: []
+  property var recentAppIds: []
+  property var recentAppsList: []
   property int selectedIndex: 0
   property string filterQuery: ""
+
+  // Persistent loader for recently opened apps
+  Process {
+    id: recentLoader
+    command: ["cat", Quickshell.env("HOME") + "/.local/state/lumania/recent_apps.json"]
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var str = String(text || "").trim()
+        if (str && str.startsWith("[")) {
+          try {
+            var loaded = JSON.parse(str)
+            if (Array.isArray(loaded)) {
+              root.recentAppIds = loaded
+              root.updateFilter()
+            }
+          } catch (e) {
+            console.warn("Lumania recent apps parse error:", e)
+          }
+        }
+      }
+    }
+  }
+
+  function loadRecentApps() {
+    if (!recentLoader.running) recentLoader.running = true
+  }
+
+  function recordRecentApp(appId) {
+    if (!appId) return
+    var normId = String(appId).replace(/\.desktop$/, "").trim()
+    if (!normId) return
+    var list = [normId]
+    for (var i = 0; i < root.recentAppIds.length; i++) {
+      var item = String(root.recentAppIds[i]).replace(/\.desktop$/, "").trim()
+      if (item && item !== normId && list.indexOf(item) === -1) {
+        list.push(item)
+      }
+      if (list.length >= 15) break
+    }
+    root.recentAppIds = list
+    var jsonStr = JSON.stringify(list)
+    Quickshell.execDetached(["bash", "-c", "mkdir -p ~/.local/state/lumania && cat << 'EOF' > ~/.local/state/lumania/recent_apps.json\n" + jsonStr + "\nEOF"])
+  }
+
+  // Multi-tier robust icon resolver
+  function resolveAppIcon(rawIcon, name, id) {
+    var ic = String(rawIcon || "").trim()
+
+    if (!ic) {
+      if (id) {
+        ic = String(id).replace(/\.desktop$/, "").trim()
+      } else if (name) {
+        ic = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+      }
+    }
+
+    if (!ic) return Quickshell.iconPath("application-x-executable", true)
+
+    // 1. Direct file or URI path
+    if (ic.indexOf("file://") === 0 || ic.indexOf("image://") === 0) return ic
+    if (ic.charAt(0) === "/") return "file://" + ic
+
+    // 2. Omarchy Shell appLibrary iconSource
+    if (root.shell && root.shell.appLibrary && typeof root.shell.appLibrary.iconSource === "function") {
+      try {
+        var src = root.shell.appLibrary.iconSource(ic)
+        if (src && src.length > 0 && src.indexOf("application-x-executable") === -1) {
+          return src
+        }
+      } catch (err) {}
+    }
+
+    // 3. Quickshell themed icon lookup
+    var themed = Quickshell.iconPath(ic, true)
+    if (themed && themed.length > 0) return themed
+
+    // 4. Strip extension if present (.png, .svg)
+    if (ic.indexOf(".") > 0) {
+      var noExt = ic.substring(0, ic.lastIndexOf("."))
+      var themedNoExt = Quickshell.iconPath(noExt, true)
+      if (themedNoExt && themedNoExt.length > 0) return themedNoExt
+    }
+
+    // 5. Lowercase variation
+    var lower = ic.toLowerCase()
+    if (lower !== ic) {
+      var themedLower = Quickshell.iconPath(lower, true)
+      if (themedLower && themedLower.length > 0) return themedLower
+    }
+
+    // 6. Reverse-DNS last segment (e.g. org.gnome.DiskUtility -> DiskUtility or diskutility)
+    if (ic.indexOf(".") > 0) {
+      var parts = ic.split(".")
+      var lastPart = parts[parts.length - 1]
+      var themedLast = Quickshell.iconPath(lastPart, true)
+      if (themedLast && themedLast.length > 0) return themedLast
+      var themedLastLower = Quickshell.iconPath(lastPart.toLowerCase(), true)
+      if (themedLastLower && themedLastLower.length > 0) return themedLastLower
+    }
+
+    // 7. Desktop ID fallback
+    if (id) {
+      var cleanId = String(id).replace(/\.desktop$/, "").trim()
+      if (cleanId.toLowerCase() !== ic.toLowerCase()) {
+        var themedId = Quickshell.iconPath(cleanId, true)
+        if (themedId && themedId.length > 0) return themedId
+        var themedIdLower = Quickshell.iconPath(cleanId.toLowerCase(), true)
+        if (themedIdLower && themedIdLower.length > 0) return themedIdLower
+      }
+    }
+
+    // 8. Name in kebab-case
+    if (name) {
+      var nameKebab = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")
+      if (nameKebab !== ic.toLowerCase()) {
+        var themedName = Quickshell.iconPath(nameKebab, true)
+        if (themedName && themedName.length > 0) return themedName
+      }
+    }
+
+    return Quickshell.iconPath("application-x-executable", true)
+  }
+
+  // Authentic iOS fluid boundary resistance (Law 7)
+  function appleRubberBand(overshoot, d) {
+    if (overshoot <= 0) return 0
+    var c = 0.55
+    return (1.0 - 1.0 / (overshoot * c / d + 1.0)) * d
+  }
 
   function refreshApps() {
     var list = []
@@ -205,7 +347,38 @@ Item {
   function updateFilter() {
     var q = filterQuery.trim().toLowerCase()
     if (!q) {
-      root.filteredApps = root.allApps
+      var recentItems = []
+      var seenRecent = {}
+
+      if (root.recentAppIds && root.recentAppIds.length > 0) {
+        // Match recent items in the exact order of recentAppIds
+        for (var r = 0; r < root.recentAppIds.length; r++) {
+          var targetId = String(root.recentAppIds[r]).toLowerCase().replace(/\.desktop$/, "")
+          for (var a = 0; a < root.allApps.length; a++) {
+            var appItem = root.allApps[a]
+            var aid = String(appItem.id || "").toLowerCase().replace(/\.desktop$/, "")
+            var aname = String(appItem.name || "").toLowerCase()
+            if ((aid === targetId || aname === targetId) && !seenRecent[appItem.id]) {
+              seenRecent[appItem.id] = true
+              recentItems.push(appItem)
+              break
+            }
+          }
+          if (recentItems.length >= frameConfig.searchGridColumns) break
+        }
+      }
+
+      // Remaining apps in alphabetical order without duplicating top row recents
+      var remaining = []
+      for (var k = 0; k < root.allApps.length; k++) {
+        var it = root.allApps[k]
+        if (!seenRecent[it.id]) {
+          remaining.push(it)
+        }
+      }
+
+      root.recentAppsList = recentItems
+      root.filteredApps = recentItems.concat(remaining)
       root.selectedIndex = 0
       return
     }
@@ -229,7 +402,23 @@ Item {
       }
     }
 
-    var result = exactMatches.concat(prefixMatches).concat(fuzzyMatches)
+    function sortByRecent(arr) {
+      if (!root.recentAppIds || root.recentAppIds.length === 0) return arr
+      return arr.sort(function(a, b) {
+        var aId = String(a.id || "").toLowerCase().replace(/\.desktop$/, "")
+        var bId = String(b.id || "").toLowerCase().replace(/\.desktop$/, "")
+        var aIdx = root.recentAppIds.indexOf(aId)
+        var bIdx = root.recentAppIds.indexOf(bId)
+        if (aIdx !== -1 && bIdx !== -1) return aIdx - bIdx
+        if (aIdx !== -1) return -1
+        if (bIdx !== -1) return 1
+        return a.name.localeCompare(b.name)
+      })
+    }
+
+    var result = sortByRecent(exactMatches)
+      .concat(sortByRecent(prefixMatches))
+      .concat(sortByRecent(fuzzyMatches))
 
     // If query has non-empty text, append "Run Command" option
     if (q.length > 0) {
@@ -292,6 +481,9 @@ Item {
 
   function launchItem(item) {
     if (!item) return
+    if (!item.isCommand) {
+      recordRecentApp(item.id)
+    }
     root.close()
 
     if (item.isCommand) {
@@ -314,6 +506,7 @@ Item {
 
 
   Component.onCompleted: {
+    loadRecentApps()
     refreshApps()
   }
 
@@ -395,6 +588,10 @@ Item {
         if (hovered) {
           root.hoverSuppressed = false
           root.isHoverOpen = true
+          if (root.shell && root.shell.appLibrary && typeof root.shell.appLibrary.refreshIcons === "function") {
+            root.shell.appLibrary.refreshIcons()
+          }
+          root.loadRecentApps()
           root.refreshApps()
           Qt.callLater(function() {
             if (searchInput) searchInput.forceActiveFocus()
@@ -843,6 +1040,33 @@ Item {
           Layout.fillWidth: true
           Layout.fillHeight: true
 
+          // iOS Fluid Spring Driver: fast, responsive, analytic damped harmonic oscillator (vsync frame-locked)
+          FluidSpring {
+            id: scrollSpring
+            response: 0.14
+            dampingFraction: 1.0
+            target: 0
+            value: 0
+
+            onValueChanged: {
+              resultsGrid.contentY = value
+            }
+          }
+
+          Timer {
+            id: releaseTimer
+            interval: 70
+            repeat: false
+            onTriggered: {
+              var maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
+              if (scrollSpring.target < 0) {
+                scrollSpring.retarget(0, scrollSpring.velocity)
+              } else if (scrollSpring.target > maxY) {
+                scrollSpring.retarget(maxY, scrollSpring.velocity)
+              }
+            }
+          }
+
           GridView {
             id: resultsGrid
             anchors.fill: parent
@@ -850,23 +1074,73 @@ Item {
             model: root.filteredApps
             cellWidth: Math.floor(width / Math.max(1, frameConfig.searchGridColumns))
             cellHeight: frameConfig.searchGridCellHeight
-            boundsBehavior: Flickable.StopAtBounds
-            cacheBuffer: frameConfig.searchGridCellHeight * 2
+            cacheBuffer: frameConfig.searchGridCellHeight * 6
+            interactive: false
+
+            readonly property real maxY: Math.max(0, contentHeight - height)
+            readonly property real overscrollAmount: contentY < 0 ? -contentY : (contentY > maxY ? contentY - maxY : 0)
+
+            // Elastic rubber-band subtle squish under heavy boundary overshoot
+            scale: 1.0 - Math.min(0.035, overscrollAmount / 600)
+            transformOrigin: contentY < 0 ? Item.Top : Item.Bottom
+
+            onModelChanged: {
+              scrollSpring.snapTo(0)
+              resultsGrid.contentY = 0
+            }
 
             onContentYChanged: {
               if (scrollTimer) scrollTimer.restart()
             }
 
-            // Snappier wheel / trackpad scrolling
+            // Buttery-smooth iOS-fluid kinetic scrolling: snappy, fast, zero latency
             WheelHandler {
               acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
               onWheel: function(event) {
-                var delta = event.pixelDelta.y !== 0
-                  ? event.pixelDelta.y * 2.0
-                  : (event.angleDelta.y / 120) * frameConfig.searchGridCellHeight * 1.5
                 var maxY = Math.max(0, resultsGrid.contentHeight - resultsGrid.height)
-                resultsGrid.contentY = Math.max(0, Math.min(maxY, resultsGrid.contentY - delta))
-                event.accepted = true
+                if (maxY <= 0) return
+
+                // Touchpad pixel delta: 1:1 direct tracking with Apple rubber band
+                if (event.pixelDelta.y !== 0) {
+                  var rawTarget = scrollSpring.target - event.pixelDelta.y * 1.5
+                  var boundedTarget = rawTarget
+                  if (rawTarget < 0) {
+                    boundedTarget = -root.appleRubberBand(-rawTarget, resultsGrid.height * 0.35)
+                  } else if (rawTarget > maxY) {
+                    boundedTarget = maxY + root.appleRubberBand(rawTarget - maxY, resultsGrid.height * 0.35)
+                  }
+                  scrollSpring.target = boundedTarget
+                  scrollSpring.snapTo(boundedTarget)
+                  releaseTimer.restart()
+                  event.accepted = true
+                  return
+                }
+
+                // Mouse wheel: brisk 2.2-row steps with kinetic impulse into FluidSpring
+                var delta = event.angleDelta.y
+                if (delta !== 0) {
+                  var step = -(delta / 120) * (frameConfig.searchGridCellHeight * 2.2)
+                  var currentT = scrollSpring.target
+                  if (currentT < 0) currentT = 0
+                  else if (currentT > maxY) currentT = maxY
+
+                  var nextT = currentT + step
+                  var clampedT = nextT
+
+                  if (nextT < 0) {
+                    clampedT = -root.appleRubberBand(-nextT, resultsGrid.height * 0.30)
+                  } else if (nextT > maxY) {
+                    clampedT = maxY + root.appleRubberBand(nextT - maxY, resultsGrid.height * 0.30)
+                  }
+
+                  // Snappy velocity impulse matches fast response
+                  var impulseV = (step / 0.14) * 1.2
+                  var newV = Math.max(-5000, Math.min(5000, scrollSpring.velocity + impulseV))
+
+                  scrollSpring.retarget(clampedT, newV)
+                  releaseTimer.restart()
+                  event.accepted = true
+                }
               }
             }
 
@@ -893,11 +1167,11 @@ Item {
                 Behavior on border.color { ColorAnimation { duration: 120 } }
               }
 
-              // Tactile spring scale feedback
-              scale: itemTap.pressed ? 0.93 : (delegateRoot.isSelected ? 1.03 : 1.0)
+              // Tactile spring scale feedback (0.95 on press, 1.02 pop on release/selection)
+              scale: itemTap.pressed ? 0.95 : (delegateRoot.isSelected ? 1.02 : (delegateRoot.isHovered ? 1.015 : 1.0))
               Behavior on scale {
                 NumberAnimation {
-                  duration: itemTap.pressed ? 100 : 220
+                  duration: itemTap.pressed ? 80 : 200
                   easing.type: itemTap.pressed ? Easing.OutQuad : Easing.OutBack
                   easing.overshoot: 1.15
                 }
@@ -921,62 +1195,47 @@ Item {
                 spacing: 5
                 width: parent.width - 10
 
-                // App Icon Container: cleanly renders squircle without nested double-box artifacts
-                Rectangle {
+                // App Icon: sits freely without any box enclosure, modern, crisp & vibrant
+                Item {
                   Layout.alignment: Qt.AlignHCenter
-                  width: 48
-                  height: 48
-                  radius: 13
-                  // Transparent when selected so icon sits directly inside the outer card highlight
-                  color: delegateRoot.isSelected
-                    ? "transparent"
-                    : (delegateRoot.isHovered ? Qt.rgba(0, 0, 0, 0.10) : Qt.rgba(0, 0, 0, 0.18))
-                  border.color: delegateRoot.isSelected ? "transparent" : Qt.rgba(255, 255, 255, 0.08)
-                  border.width: 1
-
-                  Behavior on color { ColorAnimation { duration: 140 } }
+                  width: 44
+                  height: 44
 
                   // Terminal icon indicator for command runner
-                  Item {
-                    anchors.fill: parent
+                  Text {
+                    anchors.centerIn: parent
                     visible: Boolean(modelData && modelData.isCommand)
-
-                    Text {
-                      anchors.centerIn: parent
-                      text: "󰞷"
-                      font.family: root.iconFont
-                      font.pixelSize: 22
-                      color: frameConfig.activeTextColor
-                      renderType: Text.NativeRendering
-                    }
+                    text: "󰞷"
+                    font.family: root.iconFont
+                    font.pixelSize: 26
+                    color: frameConfig.activeTextColor
+                    renderType: Text.NativeRendering
                   }
 
                   // Application Desktop Icon
                   Image {
                     id: appIconImg
                     anchors.centerIn: parent
-                    width: 34
-                    height: 34
-                    sourceSize.width: 68
-                    sourceSize.height: 68
-                    visible: !(modelData && modelData.isCommand)
-                    source: {
-                      var ic = modelData.icon || ""
-                      if (!ic) return Quickshell.iconPath("application-x-executable", true)
-                      if (ic.indexOf("/") >= 0 || ic.indexOf("file://") === 0) return ic
-                      return Quickshell.iconPath(ic, true)
-                    }
+                    width: 42
+                    height: 42
+                    sourceSize.width: 84
+                    sourceSize.height: 84
+                    visible: !(modelData && modelData.isCommand) && !hasError
+                    property bool hasError: status === Image.Error || (status === Image.Ready && (implicitWidth === 0 || implicitHeight === 0))
+                    source: root.resolveAppIcon(modelData ? modelData.icon : "", modelData ? modelData.name : "", modelData ? modelData.id : "")
                     fillMode: Image.PreserveAspectFit
                     asynchronous: true
+                    mipmap: true
+                    smooth: true
                   }
 
                   // Fallback letter initial if icon asset is unavailable
                   Text {
                     anchors.centerIn: parent
-                    visible: !(modelData && modelData.isCommand) && (appIconImg.status === Image.Error || appIconImg.status === Image.Null || !appIconImg.source)
-                    text: modelData.name && modelData.name.length > 0 ? modelData.name.charAt(0).toUpperCase() : "󰘔"
+                    visible: !(modelData && modelData.isCommand) && (appIconImg.hasError || appIconImg.status === Image.Null || !appIconImg.source)
+                    text: modelData && modelData.name && modelData.name.length > 0 ? modelData.name.charAt(0).toUpperCase() : "󰘔"
                     font.family: root.fontFamily
-                    font.pixelSize: 18
+                    font.pixelSize: 22
                     font.weight: Font.Bold
                     color: frameConfig.activeTextColor
                     renderType: Text.NativeRendering
@@ -1032,28 +1291,39 @@ Item {
             }
           }
 
-          // iOS-style subtle floating scroll indicator
+          // iOS-style subtle floating scroll indicator with rubber-band compression
           Rectangle {
             id: scrollIndicator
             anchors.right: parent.right
             anchors.rightMargin: 1
             width: 3.5
             radius: 1.75
-            color: Qt.rgba(255, 255, 255, 0.38)
+            color: Qt.rgba(255, 255, 255, 0.40)
             visible: resultsGrid.contentHeight > resultsGrid.height
 
-            property real visibleRatio: Math.min(1.0, resultsGrid.height / Math.max(1, resultsGrid.contentHeight))
-            height: Math.max(22, (resultsGrid.height - 8) * visibleRatio)
-            property real maxContentY: Math.max(1, resultsGrid.contentHeight - resultsGrid.height)
-            property real scrollNorm: Math.max(0.0, Math.min(1.0, resultsGrid.contentY / maxContentY))
-            y: 4 + (scrollNorm * (resultsGrid.height - 8 - height))
+            readonly property real maxY: Math.max(1, resultsGrid.contentHeight - resultsGrid.height)
+            readonly property real visibleRatio: Math.min(1.0, resultsGrid.height / Math.max(1, resultsGrid.contentHeight))
+            readonly property real baseHeight: Math.max(24, (resultsGrid.height - 12) * visibleRatio)
 
-            opacity: (resultsGrid.moving || resultsGrid.flicking || (scrollTimer && scrollTimer.running)) ? 1.0 : 0.0
-            Behavior on opacity { NumberAnimation { duration: 250 } }
+            // Over-scroll compression: shrinks pill height when pushed past edges
+            readonly property real overscroll: resultsGrid.contentY < 0
+              ? -resultsGrid.contentY
+              : (resultsGrid.contentY > maxY ? resultsGrid.contentY - maxY : 0)
+            height: Math.max(12, baseHeight - overscroll * 0.35)
+
+            // Dynamic Y position: pinned to top at top overshoot, pinned to bottom at bottom overshoot
+            y: resultsGrid.contentY < 0
+              ? 6
+              : (resultsGrid.contentY > maxY
+                  ? (resultsGrid.height - 6 - height)
+                  : (6 + (Math.max(0, Math.min(1.0, resultsGrid.contentY / maxY)) * (resultsGrid.height - 12 - height))))
+
+            opacity: (scrollSpring.animating || (scrollTimer && scrollTimer.running)) ? 1.0 : 0.0
+            Behavior on opacity { NumberAnimation { duration: 220 } }
 
             Timer {
               id: scrollTimer
-              interval: 900
+              interval: 800
               running: false
               repeat: false
             }
