@@ -191,11 +191,14 @@ Item {
   property var wifiData: ({
     enabled: true,
     connected: false,
-    signal: 0
+    ssid: "",
+    ip: "",
+    signal: 0,
+    networks: []
   })
 
   property var btData: ({
-    enabled: false,
+    enabled: true,
     connectedCount: 0,
     devices: []
   })
@@ -464,16 +467,20 @@ Item {
 
   Component.onCompleted: {
     root.refreshAll()
+    root.refreshStatus()
     root.refreshMotionPreference()
   }
 
   Timer {
-    interval: 3000
-    running: root.isOpenEffective
+    id: statusPollTimer
+    interval: root.isOpenEffective ? 2500 : 8000
+    running: true
     repeat: true
     onTriggered: {
       if (!root.isDraggingSlider) {
-        root.refreshAll()
+        if (root.isOpenEffective) {
+          root.refreshAll()
+        }
         root.refreshStatus()
       }
     }

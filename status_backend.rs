@@ -30,10 +30,21 @@ fn json_escape(s: &str) -> String {
 }
 
 fn get_active_wifi_interface() -> String {
-    let out = run_cmd(&["ip", "route", "show", "default"]);
-    for part in out.split_whitespace().collect::<Vec<_>>().windows(2) {
-        if part[0] == "dev" {
-            return part[1].to_string();
+    if let Ok(entries) = fs::read_dir("/sys/class/net") {
+        for entry in entries.flatten() {
+            let p = entry.path();
+            if p.join("wireless").exists() {
+                if let Some(name) = p.file_name().and_then(|n| n.to_str()) {
+                    return name.to_string();
+                }
+            }
+        }
+    }
+    let out = run_cmd(&["nmcli", "-t", "-f", "DEVICE,TYPE", "dev"]);
+    for line in out.lines() {
+        let parts: Vec<&str> = line.split(':').collect();
+        if parts.len() >= 2 && parts[1] == "wifi" {
+            return parts[0].to_string();
         }
     }
     "wlo1".to_string()
@@ -70,10 +81,16 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
         };
     }
 
-    let out = run_cmd(&[
+    let mut out = run_cmd(&[
         "nmcli", "-t", "-f", "in-use,ssid,signal,security",
-        "dev", "wifi", "list", "--rescan", "auto"
+        "dev", "wifi", "list", "--rescan", "no"
     ]);
+    if out.trim().is_empty() {
+        out = run_cmd(&[
+            "nmcli", "-t", "-f", "in-use,ssid,signal,security",
+            "dev", "wifi", "list", "--rescan", "auto"
+        ]);
+    }
 
     let mut networks: Vec<WifiNetwork> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
@@ -115,6 +132,26 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
                     active: is_active,
                 });
             }
+        }
+    }
+
+    // Cross-verify connected status with nmcli dev if list didn't flag active SSID
+    if connected_ssid.is_empty() {
+        let dev_out = run_cmd(&["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "dev"]);
+        for line in dev_out.lines() {
+            let parts: Vec<&str> = line.split(':').collect();
+            if parts.len() >= 4 && parts[1] == "wifi" && parts[2] == "connected" {
+                connected_ssid = parts[3].to_string();
+                break;
+            }
+        }
+    }
+
+    if connected_signal == 0 && !connected_ssid.is_empty() {
+        if let Some(net) = networks.iter().find(|n| n.ssid == connected_ssid) {
+            connected_signal = net.signal;
+        } else {
+            connected_signal = 75;
         }
     }
 
@@ -524,6 +561,11 @@ fn main() {
     json.push_str(&format!("\"charging\":{},", battery.charging));
     json.push_str(&format!("\"plugged\":{}", battery.plugged));
     json.push_str("}}");
+
+    if let Ok(runtime) = env::var("XDG_RUNTIME_DIR") {
+        let cache_path = Path::new(&runtime).join("lumania-status.json");
+        let _ = fs::write(cache_path, &json);
+    }
 
     println!("{}", json);
 }

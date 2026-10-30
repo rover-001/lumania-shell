@@ -73,7 +73,7 @@ Item {
   })
 
   property var btData: ({
-    enabled: false,
+    enabled: true,
     connectedCount: 0,
     devices: []
   })
@@ -112,12 +112,16 @@ Item {
     if (!statusProc.running) statusProc.running = true
   }
 
+  Component.onCompleted: {
+    root.refresh()
+  }
+
   Timer {
-    interval: 3000
+    interval: root.isOpen ? 2500 : 8000
     running: true
     repeat: true
     onTriggered: {
-      if (root.isOpen) root.refresh()
+      root.refresh()
     }
   }
 

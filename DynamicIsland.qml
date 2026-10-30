@@ -334,7 +334,7 @@ Item {
     // status toggles now live in the bottom-right control center notch.
     // Driven by the loaded track (not the live audio energy) so a paused track keeps its
     // controls on screen and can be resumed from the same notch.
-    readonly property bool isHovered: isPointerOver && root.hasActualMedia && root.notificationProgress < 0.01
+    readonly property bool isHovered: isPointerOver && !root.inCall && root.hasActualMedia && root.notificationProgress < 0.01
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
@@ -402,7 +402,7 @@ Item {
 
     // Height expansion delta: taller when idle (+42px down to 79px) to fit 48px circles,
     // and sleek when media is loaded (+24px down to 61px) to fit 44px media controls
-    readonly property real activeHoverHeightDelta: root.hasActualMedia
+    readonly property real activeHoverHeightDelta: (root.hasActualMedia && !root.inCall)
       ? root.frameConfig.islandHoverHeightDeltaMedia
       : root.frameConfig.islandHoverHeightDeltaIdle
 
@@ -459,12 +459,12 @@ Item {
 
     HoverHandler {
       id: islandHover
-      cursorShape: Qt.PointingHandCursor
+      cursorShape: (!root.inCall && root.hasActualMedia) ? Qt.PointingHandCursor : (!root.inCall ? Qt.PointingHandCursor : Qt.ArrowCursor)
     }
 
     TapHandler {
       id: tapHandler
-      enabled: !islandContainer.isHovered && !root.hasActualMedia && root.notificationProgress < 0.01
+      enabled: !islandContainer.isHovered && !root.hasActualMedia && !root.inCall && root.notificationProgress < 0.01
       onTapped: {
         root.use24Hour = !root.use24Hour
         root.updateClock()
@@ -658,11 +658,11 @@ Item {
       anchors.centerIn: parent
       anchors.verticalCenterOffset: root.borderThickness * 0.5
       spacing: 18
-      opacity: (islandContainer.hoverProgress > 0.15 && root.hasActualMedia && root.notificationProgress < 0.01)
+      opacity: (!root.inCall && islandContainer.hoverProgress > 0.15 && root.hasActualMedia && root.notificationProgress < 0.01)
         ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
         : 0.0
       scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && root.hasActualMedia && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && !root.inCall && root.hasActualMedia && root.notificationProgress < 0.01
       transformOrigin: Item.Center
 
       // 1. Skip Previous Track (Shown only for videos/songs, hidden on calls)
