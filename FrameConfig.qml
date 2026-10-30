@@ -46,6 +46,17 @@ QtObject {
   readonly property color activeSliderIconColorFilled: dynamicWallpaperColor ? autoSliderIconFilled : sliderIconColorFilled
 
   // =========================================================================
+  // KEYBOARD BACKLIGHT SYNC
+  // =========================================================================
+  // Mirrors the active wallpaper tone (activeBorderColor) onto the keyboard
+  // backlight through the `lumania-keyboard` helper. The helper probes the
+  // machine first: HP OMEN 4-zone RGB and LED backlights with real colour
+  // channels sync automatically; boards needing their own protocol (OpenRGB,
+  // monochrome brightness) are opt-in there via LUMANIA_KEYBOARD_BACKEND, and
+  // anything it cannot drive is left untouched.
+  property bool syncKeyboardColor: true
+
+  // =========================================================================
   // CORNER CURVATURE & BORDER MERGING CONSTANTS
   // =========================================================================
   // Fillet radius (in pixels) for how the borders curve and merge into each other:

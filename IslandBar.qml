@@ -27,6 +27,16 @@ Item {
     frameConfig: frameConfig
   }
 
+  // Persistent Settings Bridge (~/.config/omarchy/lumania.json)
+  SettingsBridge {
+    frameConfig: frameConfig
+  }
+
+  // Keyboard backlight follows the same wallpaper tone
+  KeyboardColorSync {
+    frameConfig: frameConfig
+  }
+
   // State consumed by host shell and overlays
   property bool barHidden: false
 

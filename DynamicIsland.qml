@@ -369,8 +369,8 @@ Item {
       }
     }
 
-    // The island morphs open when there is actual media, an active timer, or an active call to control
-    readonly property bool isHovered: isPointerOver && (root.hasActualMedia || root.isTimerRunning || root.inCall) && root.notificationProgress < 0.01
+    // The island morphs open on hover to expose media controls, active timer, or quick presets
+    readonly property bool isHovered: isPointerOver && root.notificationProgress < 0.01
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
@@ -437,9 +437,7 @@ Item {
       + (activeExpansionProgress * (root.frameConfig.islandExpandedBottomCornerRadius - root.bottomCornerRadius))
 
     // Height expansion delta: sleek (+24px down to 61px, +6px when multi-activities to give bottom dots breathing room)
-    readonly property real activeHoverHeightDelta: (root.hasActualMedia || root.isTimerRunning || root.inCall)
-      ? (root.frameConfig.islandHoverHeightDeltaMedia + (root.availablePages.length > 1 ? 6 : 0))
-      : root.frameConfig.islandHoverHeightDeltaIdle
+    readonly property real activeHoverHeightDelta: root.frameConfig.islandHoverHeightDeltaMedia + (root.availablePages.length > 1 ? 6 : 0)
 
     // Dynamic width calculation based on active notification content size
     readonly property real notifContentTextWidth: Math.max(
@@ -494,7 +492,7 @@ Item {
 
     HoverHandler {
       id: islandHover
-      cursorShape: (root.hasActualMedia || root.isTimerRunning || root.inCall) ? Qt.PointingHandCursor : Qt.ArrowCursor
+      cursorShape: Qt.PointingHandCursor
     }
 
     // Scroll wheel flips between available activities (Call, Media, Timer)

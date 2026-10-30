@@ -1,0 +1,224 @@
+#!/bin/bash
+# Lumania keyboard colour backend
+#
+# Applies a wallpaper-derived tone to the keyboard backlight. Every board is
+# different, so the hardware lives here (not in the QML): the shell asks
+# `lumania-keyboard --probe` what this machine can do and only writes when a
+# colour channel actually exists.
+#
+#   lumania-keyboard '#8a4b3f'   apply a tone (#rrggbb or rrggbb)
+#   lumania-keyboard --probe    print JSON describing the detected backend
+#   lumania-keyboard --help
+#
+# Backends, first usable one wins:
+#   omen4zone   HP OMEN 4-zone RGB (omen-rgb-keyboard driver, rgb_zones sysfs)
+#   multicolor  LED-class keyboard backlight with red/green/blue channels
+#   openrgb     OpenRGB CLI. Opt-in only: it drives every RGB device it manages.
+#   brightness  Monochrome backlight; brightness follows the tone's luminance.
+#               Opt-in only, there is no colour channel to drive.
+#
+# Environment overrides:
+#   LUMANIA_KEYBOARD_BACKEND         force a backend name
+#   LUMANIA_KEYBOARD_TARGET          force the sysfs node / LED directory
+#   LUMANIA_KEYBOARD_OPENRGB_DEVICE  OpenRGB device index (default: all)
+set -u
+
+export PATH="$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+
+PROBE=0
+TONE=""
+BACKEND="${LUMANIA_KEYBOARD_BACKEND:-}"
+
+usage() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --probe) PROBE=1; shift ;;
+    --backend) BACKEND="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*) echo "lumania-keyboard: unknown option $1" >&2; exit 2 ;;
+    *) TONE="$1"; shift ;;
+  esac
+done
+
+# ---------------------------------------------------------------- detection --
+
+# An explicit LUMANIA_KEYBOARD_TARGET is exclusive: a wrong override must fail
+# loudly instead of silently writing to some other node on the machine.
+find_omen() {
+  local paths p
+  if [ -n "${LUMANIA_KEYBOARD_TARGET:-}" ]; then
+    paths=("$LUMANIA_KEYBOARD_TARGET")
+  else
+    paths=(/sys/devices/platform/omen-rgb-keyboard/rgb_zones/all
+           /sys/devices/platform/omen*/rgb_zones/all)
+  fi
+  for p in "${paths[@]}"; do
+    [ -w "$p" ] && { printf '%s' "$p"; return 0; }
+  done
+  return 1
+}
+
+find_multicolor() {
+  local dirs dir
+  if [ -n "${LUMANIA_KEYBOARD_TARGET:-}" ]; then
+    dirs=("${LUMANIA_KEYBOARD_TARGET%/}")
+  else
+    dirs=(/sys/class/leds/*kbd*/)
+  fi
+  for dir in "${dirs[@]}"; do
+    [ -w "$dir/multi_intensity" ] || continue
+    grep -qw red "$dir/multi_index" 2>/dev/null || continue
+    grep -qw green "$dir/multi_index" 2>/dev/null || continue
+    grep -qw blue "$dir/multi_index" 2>/dev/null || continue
+    printf '%s' "${dir%/}"
+    return 0
+  done
+  return 1
+}
+
+find_brightness() {
+  local dirs dir
+  if [ -n "${LUMANIA_KEYBOARD_TARGET:-}" ]; then
+    dirs=("${LUMANIA_KEYBOARD_TARGET%/}")
+  else
+    dirs=(/sys/class/leds/*kbd*/)
+  fi
+  for dir in "${dirs[@]}"; do
+    [ -w "$dir/brightness" ] || continue
+    printf '%s' "${dir%/}"
+    return 0
+  done
+  return 1
+}
+
+find_openrgb() {
+  command -v openrgb >/dev/null 2>&1 || return 1
+  command -v openrgb | sed 's#/openrgb$##'
+}
+
+# Without an explicit request, only true RGB interfaces are auto-detected so a
+# plain monochrome backlight is never hijacked by the shell.
+detect() {
+  local forced="${1:-}" found=""
+
+  case "$forced" in
+    omen4zone) found="$(find_omen)" || return 1; BACKEND=omen4zone; TARGET="$found"; return 0 ;;
+    multicolor) found="$(find_multicolor)" || return 1; BACKEND=multicolor; TARGET="$found"; return 0 ;;
+    brightness) found="$(find_brightness)" || return 1; BACKEND=brightness; TARGET="$found"; return 0 ;;
+    openrgb) found="$(find_openrgb)" || return 1; BACKEND=openrgb; TARGET="$found"; return 0 ;;
+    "") : ;;
+    *) return 1 ;;
+  esac
+
+  if found="$(find_omen)"; then BACKEND=omen4zone; TARGET="$found"; return 0; fi
+  if found="$(find_multicolor)"; then BACKEND=multicolor; TARGET="$found"; return 0; fi
+  BACKEND=""
+  return 1
+}
+
+backend_json() {
+  local ok="$1" name="$2" target="${3:-}" reason="${4:-}"
+  if [ "$ok" = 1 ]; then
+    printf '{"supported":true,"backend":"%s","target":"%s"}' "$name" "$target"
+  else
+    printf '{"supported":false,"backend":"none","target":"","reason":"%s","optIn":["openrgb","brightness"]}' \
+      "${reason:-no writable RGB keyboard interface}"
+  fi
+}
+
+# ------------------------------------------------------------------- colour --
+
+parse_tone() {
+  local t="${1#\#}"
+  t="${t,,}"
+  [[ "$t" =~ ^[0-9a-f]{6}$ ]] || return 1
+  RGB="$t"
+  R=$((16#${t:0:2}))
+  G=$((16#${t:2:2}))
+  B=$((16#${t:4:2}))
+  return 0
+}
+
+apply_omen4zone() {
+  printf '%s' "$RGB" > "$TARGET" 2>/dev/null
+}
+
+apply_multicolor() {
+  local names max i val r=0 g=0 b=0 out=""
+  read -r -a names < "$TARGET/multi_index" 2>/dev/null || return 1
+  max="$(cat "$TARGET/max_intensity" 2>/dev/null || cat "$TARGET/max_brightness" 2>/dev/null || echo 255)"
+  [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || max=255
+  for ((i=0; i<${#names[@]}; i++)); do
+    case "${names[i]}" in
+      red) val=$((R * max / 255)) ;;
+      green) val=$((G * max / 255)) ;;
+      blue) val=$((B * max / 255)) ;;
+      *) val=0 ;;
+    esac
+    out+="${out:+ }$val"
+  done
+  printf '%s' "$out" > "$TARGET/multi_intensity" 2>/dev/null
+}
+
+apply_openrgb() {
+  local cli dev="${LUMANIA_KEYBOARD_OPENRGB_DEVICE:-}"
+  cli="$(command -v openrgb)" || return 1
+  if [ -n "$dev" ]; then
+    "$cli" --device "$dev" --mode static --color "$RGB" >/dev/null 2>&1
+  else
+    "$cli" --mode static --color "$RGB" >/dev/null 2>&1
+  fi
+}
+
+apply_brightness() {
+  local max val
+  max="$(cat "$TARGET/max_brightness" 2>/dev/null || echo 100)"
+  [[ "$max" =~ ^[0-9]+$ ]] && [ "$max" -gt 0 ] || max=100
+  # Rec.601 luminance of the tone, expressed on the backlight's own scale
+  val=$(( (2126 * R + 7152 * G + 722 * B) / 10000 * max / 255 ))
+  [ "$val" -lt 1 ] && val=1
+  printf '%s' "$val" > "$TARGET/brightness" 2>/dev/null
+}
+
+# --------------------------------------------------------------------- main --
+
+if ! detect "$BACKEND"; then
+  if [ "$PROBE" = 1 ]; then
+    if [ -n "$BACKEND" ]; then
+      backend_json 0 none "requested backend '$BACKEND' is not available"
+    else
+      backend_json 0 none
+    fi
+    echo
+    exit 0
+  fi
+  echo "lumania-keyboard: no writable RGB keyboard interface" >&2
+  exit 1
+fi
+
+if [ "$PROBE" = 1 ]; then
+  backend_json 1 "$BACKEND" "${TARGET:-}"
+  echo
+  exit 0
+fi
+
+if [ -z "$TONE" ]; then
+  echo "lumania-keyboard: missing colour (try --help)" >&2
+  exit 2
+fi
+
+if ! parse_tone "$TONE"; then
+  echo "lumania-keyboard: '$TONE' is not an #rrggbb colour" >&2
+  exit 2
+fi
+
+case "$BACKEND" in
+  omen4zone) apply_omen4zone ;;
+  multicolor) apply_multicolor ;;
+  openrgb) apply_openrgb ;;
+  brightness) apply_brightness ;;
+  *) echo "lumania-keyboard: unsupported backend '$BACKEND'" >&2; exit 1 ;;
+esac || { echo "lumania-keyboard: write to $BACKEND failed" >&2; exit 1; }

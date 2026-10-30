@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "lumania.island",
   "name": "Lumania Island",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "author": "rover",
   "license": "MIT",
   "description": "Full desktop shell for Omarchy: screen frame, Dynamic Island, and pop-out notches for launcher, wallpapers, workspaces and control center.",
