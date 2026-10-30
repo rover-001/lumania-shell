@@ -17,6 +17,7 @@ Item {
   property bool barHidden: false
   property bool hasOpenApps: false
   property var notificationManager: null
+  property var timerManager: null
   property int islandWindowHeight: 380
 
   // Host & plugin registry references
@@ -139,6 +140,7 @@ Item {
           fontFamily: root.fontFamily
           hasOpenApps: root.hasOpenApps
           notificationManager: root.notificationManager
+          timerManager: root.timerManager
         }
       }
     }

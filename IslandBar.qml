@@ -139,6 +139,36 @@ Item {
     id: notificationManager
   }
 
+  // Live Timer Activity Engine for Dynamic Island
+  TimerManager {
+    id: timerManager
+    notificationManager: notificationManager
+  }
+
+  IpcHandler {
+    target: "lumania.island"
+
+    function timer(duration: string, label: string): void {
+      timerManager.startTimer(duration, label || "")
+    }
+
+    function setTimer(duration: string): void {
+      timerManager.startTimer(duration, "")
+    }
+
+    function timerPause(): void {
+      timerManager.togglePause()
+    }
+
+    function timerCancel(): void {
+      timerManager.cancel()
+    }
+
+    function timerAddMinute(): void {
+      timerManager.addSeconds(60)
+    }
+  }
+
   // 1. Top Bar Window (Top border line, corners, Dynamic Island notch & subpanel)
   TopBarWindow {
     frameConfig: frameConfig
@@ -151,6 +181,7 @@ Item {
     fullscreen: root.fullscreenActive
     hasOpenApps: root.hasOpenApps
     notificationManager: notificationManager
+    timerManager: timerManager
     shell: root.shell
     barWidgetRegistry: root.barWidgetRegistry
     pluginRegistry: root.pluginRegistry

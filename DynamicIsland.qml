@@ -21,6 +21,40 @@ Item {
   property string iconFont: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
   property bool hasOpenApps: false
   property var notificationManager: null
+  property var timerManager: null
+
+  readonly property bool isTimerRunning: Boolean(timerManager && timerManager.active)
+  readonly property bool hasBothMediaAndTimer: Boolean(root.hasActualMedia && root.isTimerRunning)
+
+  readonly property var availablePages: {
+    var pages = []
+    if (root.inCall) pages.push("call")
+    if (root.hasActualMedia) pages.push("media")
+    pages.push("timer")
+    return pages
+  }
+  property int activePageIndex: 0
+  readonly property string currentPageType: {
+    var p = availablePages
+    if (activePageIndex >= 0 && activePageIndex < p.length) return p[activePageIndex]
+    return p[0] || "timer"
+  }
+
+  onInCallChanged: {
+    if (root.inCall) root.activePageIndex = 0
+  }
+
+  onHasActualMediaChanged: {
+    if (root.hasActualMedia && !root.inCall) {
+      root.activePageIndex = 0
+    }
+  }
+
+  onIsTimerRunningChanged: {
+    if (root.isTimerRunning && !root.inCall && !root.hasActualMedia) {
+      root.activePageIndex = 0
+    }
+  }
 
   readonly property bool hasNotification: Boolean(notificationManager && notificationManager.hasNotification)
   property real notificationProgress: hasNotification ? 1.0 : 0.0
@@ -182,12 +216,17 @@ Item {
   function isCallOrComm(p) {
     if (!p) return false
     var id = String(p.identity || "").toLowerCase()
+    var dbus = String(p.dbusName || "").toLowerCase()
     var title = String(p.trackTitle || "").toLowerCase()
     var artist = String(p.trackArtist || "").toLowerCase()
-    if (id.indexOf("discord") !== -1 || id.indexOf("whatsapp") !== -1 ||
-        id.indexOf("telegram") !== -1 || id.indexOf("slack") !== -1 ||
-        id.indexOf("zoom") !== -1 || id.indexOf("teams") !== -1 ||
-        id.indexOf("skype") !== -1 || id.indexOf("webrtc") !== -1) {
+    if (id.indexOf("discord") !== -1 || dbus.indexOf("discord") !== -1 ||
+        id.indexOf("whatsapp") !== -1 || dbus.indexOf("whatsapp") !== -1 ||
+        id.indexOf("telegram") !== -1 || dbus.indexOf("telegram") !== -1 ||
+        id.indexOf("slack") !== -1 || dbus.indexOf("slack") !== -1 ||
+        id.indexOf("zoom") !== -1 || dbus.indexOf("zoom") !== -1 ||
+        id.indexOf("teams") !== -1 || dbus.indexOf("teams") !== -1 ||
+        id.indexOf("skype") !== -1 || dbus.indexOf("skype") !== -1 ||
+        id.indexOf("webrtc") !== -1 || dbus.indexOf("webrtc") !== -1) {
       return true
     }
     return false
@@ -209,7 +248,10 @@ Item {
     if (root.stickyPlayerName.length === 0) return null
     for (var i = 0; i < players.length; i++) {
       var p = players[i]
-      if (p && !root.isCallOrComm(p) && root.playerKey(p) === root.stickyPlayerName) return p
+      if (p && !root.isCallOrComm(p) && root.playerKey(p) === root.stickyPlayerName) {
+        if (p.playbackStatus === "Stopped") return null
+        return p
+      }
     }
     return null
   }
@@ -230,7 +272,7 @@ Item {
 
   function getActivePlayer() {
     var players = Mpris.players ? Mpris.players.values : []
-    // 0. The last player the user played keeps the controls (paused included)
+    // 0. The player the user actually started or resumed keeps the controls (including while paused)
     var sticky = root.findStickyPlayer(players)
     if (sticky && (sticky.trackTitle || sticky.trackArtist || sticky.canGoNext || sticky.canGoPrevious)) {
       return sticky
@@ -247,17 +289,14 @@ Item {
       var q = players[j]
       if (q && q.isPlaying && !root.isCallOrComm(q)) return q
     }
-    // 3. Any player with metadata (non-call)
-    for (var k = 0; k < players.length; k++) {
-      var r = players[k]
-      if (r && !root.isCallOrComm(r) && (r.trackTitle || r.trackArtist)) return r
-    }
+    // Never fall back to cold/idle players with leftover metadata when nothing is playing!
+    // This guarantees that on startup or when no media app was opened, no buttons are shown.
     return null
   }
 
   readonly property var activePlayer: getActivePlayer()
 
-  // Actual media is active only when an authentic music/video player is playing or has track data
+  // Actual media is active only when an authentic music/video player is playing or in a paused state with track data
   readonly property bool hasActualMedia: Boolean(
     activePlayer && !root.isCallOrComm(activePlayer) && (
       (activePlayer.isPlaying && (activePlayer.trackTitle || activePlayer.trackArtist || activePlayer.canGoNext || activePlayer.canGoPrevious)) ||
@@ -330,23 +369,20 @@ Item {
       }
     }
 
-    // The island only morphs open when there is actual media to control and no notification active;
-    // status toggles now live in the bottom-right control center notch.
-    // Driven by the loaded track (not the live audio energy) so a paused track keeps its
-    // controls on screen and can be resumed from the same notch.
-    readonly property bool isHovered: isPointerOver && !root.inCall && root.hasActualMedia && root.notificationProgress < 0.01
+    // The island morphs open when there is actual media, an active timer, or an active call to control
+    readonly property bool isHovered: isPointerOver && (root.hasActualMedia || root.isTimerRunning || root.inCall) && root.notificationProgress < 0.01
     readonly property real targetHoverProgress: isHovered ? 1.0 : 0.0
     property real hoverProgress: targetHoverProgress
 
     // Auto-retract inward when apps are opened; springs down immediately when cursor touches top edge
     // or when an active notification is received ("come in show the notif and then move out")
-    // NEVER retracts while a call is active or a track is actively playing — stays pinned
-    // above every window (exactly like the call view) until the call / playback ends!
+    // NEVER retracts while a call is active, a track is actively playing, or a countdown timer is running!
     readonly property bool shouldRetract: root.hasOpenApps
       && !isPointerOver
       && !root.hasNotification
       && !root.inCall
       && !dynamicView.mprisPlaying
+      && !root.isTimerRunning
       && root.notificationProgress < 0.01
       && islandContainer.hoverProgress < 0.05
     readonly property real targetRetractY: shouldRetract ? -(root.islandHeight - root.borderThickness) : 0.0
@@ -400,10 +436,9 @@ Item {
     readonly property real currentBottomRadius: root.bottomCornerRadius
       + (activeExpansionProgress * (root.frameConfig.islandExpandedBottomCornerRadius - root.bottomCornerRadius))
 
-    // Height expansion delta: taller when idle (+42px down to 79px) to fit 48px circles,
-    // and sleek when media is loaded (+24px down to 61px) to fit 44px media controls
-    readonly property real activeHoverHeightDelta: (root.hasActualMedia && !root.inCall)
-      ? root.frameConfig.islandHoverHeightDeltaMedia
+    // Height expansion delta: sleek (+24px down to 61px, +6px when multi-activities to give bottom dots breathing room)
+    readonly property real activeHoverHeightDelta: (root.hasActualMedia || root.isTimerRunning || root.inCall)
+      ? (root.frameConfig.islandHoverHeightDeltaMedia + (root.availablePages.length > 1 ? 6 : 0))
       : root.frameConfig.islandHoverHeightDeltaIdle
 
     // Dynamic width calculation based on active notification content size
@@ -428,18 +463,18 @@ Item {
 
     readonly property real notifHeightDelta: 18
 
-    // Authentic iOS liquid stretch:
-    // Pill widens dynamically based on active call, notification size, or hover
-    readonly property real normalWidth: root.islandWidth
+    // Authentic iOS liquid stretch: pure continuous spring function (zero discontinuous steps)
+    readonly property real baseWidth: root.callShowing ? 206 : root.islandWidth
+    readonly property real normalWidth: baseWidth
       + (hoverProgress * root.frameConfig.islandHoverWidthDelta)
       + (root.notificationProgress * animatedNotifWidthDelta)
       + (Math.sin(Math.min(1.0, Math.max(0.0, transitionProgress)) * Math.PI) * 8.0)
       + (Math.sin(Math.min(1.0, Math.max(0.0, hoverProgress)) * Math.PI) * 6.0)
       + (Math.sin(Math.min(1.0, Math.max(0.0, root.notificationProgress)) * Math.PI) * 10.0)
 
-    width: root.callShowing ? 206 : normalWidth
+    width: normalWidth
 
-    // Height expands downwards on hover (+42px idle, +24px media) or notification (+18px)
+    // Height expands downwards on hover (+42px idle, +24px media/timer/call) or notification (+18px)
     height: root.islandHeight
       + (hoverProgress * activeHoverHeightDelta)
       + (root.notificationProgress * notifHeightDelta)
@@ -459,12 +494,26 @@ Item {
 
     HoverHandler {
       id: islandHover
-      cursorShape: (!root.inCall && root.hasActualMedia) ? Qt.PointingHandCursor : (!root.inCall ? Qt.PointingHandCursor : Qt.ArrowCursor)
+      cursorShape: (root.hasActualMedia || root.isTimerRunning || root.inCall) ? Qt.PointingHandCursor : Qt.ArrowCursor
+    }
+
+    // Scroll wheel flips between available activities (Call, Media, Timer)
+    WheelHandler {
+      id: islandWheel
+      acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+      enabled: islandContainer.isHovered && root.availablePages.length > 1
+      onWheel: function(event) {
+        if (event.angleDelta.y < 0) {
+          root.activePageIndex = Math.min(root.availablePages.length - 1, root.activePageIndex + 1)
+        } else if (event.angleDelta.y > 0) {
+          root.activePageIndex = Math.max(0, root.activePageIndex - 1)
+        }
+      }
     }
 
     TapHandler {
       id: tapHandler
-      enabled: !islandContainer.isHovered && !root.hasActualMedia && !root.inCall && root.notificationProgress < 0.01
+      enabled: !islandContainer.isHovered && !root.hasActualMedia && !root.isTimerRunning && !root.inCall && root.notificationProgress < 0.01
       onTapped: {
         root.use24Hour = !root.use24Hour
         root.updateClock()
@@ -581,12 +630,12 @@ Item {
       anchors.verticalCenterOffset: -5.0 * islandContainer.transitionProgress
       spacing: 8
 
-      // Transitions out when audio starts, when in call, when hovered/opened, or when notification is active
-      opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01)
+      // Transitions out when audio starts, when in call, when hovered/opened, when timer is running, or when notification is active
+      opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01 && !root.isTimerRunning)
         ? Math.max(0.0, 1.0 - islandContainer.transitionProgress * 2.2)
         : 0.0
       scale: Math.max(0.82, 1.0 - islandContainer.transitionProgress * 0.16)
-      visible: opacity > 0.01 && !root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && !root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01 && !root.isTimerRunning
       transformOrigin: Item.Center
 
       Behavior on opacity {
@@ -627,6 +676,72 @@ Item {
     }
 
     // =========================================================================
+    // Content Layer 1B: Collapsed Timer View (Icon, Countdown, Optional Label)
+    // Shown when timer is running and no audio/media is active.
+    // =========================================================================
+    Row {
+      id: collapsedTimerRow
+      anchors.horizontalCenter: parent.horizontalCenter
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.verticalCenterOffset: -5.0 * islandContainer.transitionProgress
+      spacing: 7
+
+      opacity: (!root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01 && !dynamicView.showVisualizer && root.isTimerRunning)
+        ? 1.0
+        : 0.0
+      scale: opacity > 0.01 ? 1.0 : 0.85
+      visible: opacity > 0.01 && !root.inCall && !islandContainer.isHovered && islandContainer.hoverProgress < 0.02 && root.notificationProgress < 0.01 && !dynamicView.showVisualizer && root.isTimerRunning
+      transformOrigin: Item.Center
+
+      Behavior on opacity {
+        NumberAnimation { duration: 140 }
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: "󰔛"
+        font.family: root.iconFont
+        font.pixelSize: 13
+        color: (root.timerManager && root.timerManager.paused) ? root.islandMutedColor : root.islandTextColor
+        renderType: Text.NativeRendering
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.timerManager ? root.timerManager.formattedTime : ""
+        color: (root.timerManager && root.timerManager.paused) ? root.islandMutedColor : root.islandTextColor
+        font.family: "JetBrainsMono Nerd Font, monospace"
+        font.pixelSize: 13
+        font.weight: Font.DemiBold
+        renderType: Text.NativeRendering
+        verticalAlignment: Text.AlignVCenter
+      }
+
+      Rectangle {
+        visible: Boolean(root.timerManager && root.timerManager.label)
+        anchors.verticalCenter: parent.verticalCenter
+        width: 3
+        height: 3
+        radius: 1.5
+        color: Qt.rgba(root.islandTextColor.r, root.islandTextColor.g, root.islandTextColor.b, 0.35)
+      }
+
+      Text {
+        visible: Boolean(root.timerManager && root.timerManager.label)
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.timerManager ? root.timerManager.label : ""
+        color: root.islandMutedColor
+        font.family: root.fontFamily
+        font.pixelSize: 11
+        font.weight: Font.Medium
+        renderType: Text.NativeRendering
+        verticalAlignment: Text.AlignVCenter
+        maximumLineCount: 1
+        elide: Text.ElideRight
+      }
+    }
+
+    // =========================================================================
     // Content Layer 2: Adaptive Audio Visualizer (Multi-Color Gradient Waveform)
     // Active when video/song or audio stream is playing. Hidden when opened.
     // =========================================================================
@@ -656,13 +771,15 @@ Item {
     Row {
       id: mediaControlsRow
       anchors.centerIn: parent
-      anchors.verticalCenterOffset: root.borderThickness * 0.5
+      anchors.verticalCenterOffset: root.availablePages.length > 1 ? (root.borderThickness * 0.5 - 2) : (root.borderThickness * 0.5)
       spacing: 18
-      opacity: (!root.inCall && islandContainer.hoverProgress > 0.15 && root.hasActualMedia && root.notificationProgress < 0.01)
+
+      readonly property bool mediaPageActive: root.currentPageType === "media"
+      opacity: (islandContainer.hoverProgress > 0.15 && root.hasActualMedia && root.notificationProgress < 0.01 && mediaPageActive)
         ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
         : 0.0
       scale: 0.88 + (0.12 * islandContainer.hoverProgress)
-      visible: opacity > 0.01 && !root.inCall && root.hasActualMedia && root.notificationProgress < 0.01
+      visible: opacity > 0.01 && root.hasActualMedia && root.notificationProgress < 0.01
       transformOrigin: Item.Center
 
       // 1. Skip Previous Track (Shown only for videos/songs, hidden on calls)
@@ -816,6 +933,297 @@ Item {
     }
 
     // =========================================================================
+    // Content Layer 3B: Opened Dynamic Island Timer Controls
+    // Play/Pause on Left, Countdown Time in Center, Cancel on Right End
+    // Sleek Progress Bar spanning Left to Right across the notch
+    // =========================================================================
+    // =========================================================================
+    // Content Layer 3B: Opened Dynamic Island Timer Controls
+    // Time Left on Left, Sleek Progress Bar in Center, Cross on Right
+    // =========================================================================
+    Row {
+      id: timerControlsRow
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.availablePages.length > 1 ? (root.borderThickness * 0.5 - 3) : (root.borderThickness * 0.5)
+      spacing: 10
+
+      readonly property bool timerPageActive: root.currentPageType === "timer"
+      opacity: (islandContainer.hoverProgress > 0.15 && root.isTimerRunning && root.notificationProgress < 0.01 && timerPageActive)
+        ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
+        : 0.0
+      scale: 0.88 + (0.12 * islandContainer.hoverProgress)
+      visible: opacity > 0.01 && root.isTimerRunning && root.notificationProgress < 0.01
+      transformOrigin: Item.Center
+
+      // 1. Time Left (Clean Mono digits, no extra text)
+      Text {
+        id: timerDigitsText
+        anchors.verticalCenter: parent.verticalCenter
+        text: root.timerManager ? root.timerManager.formattedTime : "00:00"
+        color: "#ffffff"
+        font.family: "JetBrainsMono Nerd Font, monospace"
+        font.pixelSize: 15
+        font.weight: Font.Bold
+        renderType: Text.NativeRendering
+      }
+
+      // 2. Sleek Progress Bar (Crisp solid fill from left to right)
+      Rectangle {
+        id: timerProgressBarTrack
+        width: 130
+        height: 6
+        radius: 3
+        color: Qt.rgba(1, 1, 1, 0.20)
+        anchors.verticalCenter: parent.verticalCenter
+        clip: true
+
+        Rectangle {
+          id: timerProgressBarFill
+          anchors.left: parent.left
+          anchors.top: parent.top
+          anchors.bottom: parent.bottom
+          width: Math.max(0, Math.min(parent.width, parent.width * (root.timerManager ? root.timerManager.progress : 0.0)))
+          radius: 3
+          color: root.frameConfig.powerButtonActiveBg
+
+          Behavior on width {
+            NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+          }
+        }
+      }
+
+      // 3. Cross (Cancel) on Right of Progress Bar
+      Rectangle {
+        id: btnTimerCancel
+        width: 30
+        height: 30
+        radius: 15
+        anchors.verticalCenter: parent.verticalCenter
+        color: cancelArea.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
+        scale: cancelArea.pressed ? 0.90 : (cancelArea.containsMouse ? 1.08 : 1.0)
+
+        Behavior on scale {
+          NumberAnimation {
+            duration: 120
+            easing.type: Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+        Behavior on color { ColorAnimation { duration: 180 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "󰅖"
+          font.family: root.iconFont
+          font.pixelSize: 14
+          color: root.frameConfig.powerButtonInactiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: cancelArea
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            if (root.timerManager) root.timerManager.cancel()
+          }
+        }
+      }
+    }
+
+    // =========================================================================
+    // Content Layer 3C: One-Tap Quick Timer Presets (Page 1 when no timer is active)
+    // Compact: 5m, 15m, 25m (Pomodoro), 45m
+    // =========================================================================
+    Row {
+      id: timerPresetsRow
+      anchors.centerIn: parent
+      anchors.verticalCenterOffset: root.availablePages.length > 1 ? (root.borderThickness * 0.5 - 3) : (root.borderThickness * 0.5)
+      spacing: 8
+
+      readonly property bool timerPageActive: root.currentPageType === "timer"
+      opacity: (islandContainer.hoverProgress > 0.15 && !root.isTimerRunning && root.notificationProgress < 0.01 && timerPageActive)
+        ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35)
+        : 0.0
+      scale: 0.88 + (0.12 * islandContainer.hoverProgress)
+      visible: opacity > 0.01 && !root.isTimerRunning && root.notificationProgress < 0.01
+      transformOrigin: Item.Center
+
+      // Icon Disc
+      Rectangle {
+        width: 32
+        height: 32
+        radius: 16
+        anchors.verticalCenter: parent.verticalCenter
+        color: Qt.rgba(1, 1, 1, 0.12)
+
+        Text {
+          anchors.centerIn: parent
+          text: "󰔛"
+          font.family: root.iconFont
+          font.pixelSize: 15
+          color: root.frameConfig.powerButtonActiveBg
+          renderType: Text.NativeRendering
+        }
+      }
+
+      // 5m Preset
+      Rectangle {
+        width: 44
+        height: 32
+        radius: 16
+        anchors.verticalCenter: parent.verticalCenter
+        color: p5Area.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
+        scale: p5Area.pressed ? 0.90 : (p5Area.containsMouse ? 1.08 : 1.0)
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+        Behavior on color { ColorAnimation { duration: 160 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "5m"
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.weight: Font.DemiBold
+          color: root.islandTextColor
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: p5Area
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (root.timerManager) root.timerManager.start(5 * 60, "5m")
+        }
+      }
+
+      // 15m Preset
+      Rectangle {
+        width: 48
+        height: 32
+        radius: 16
+        anchors.verticalCenter: parent.verticalCenter
+        color: p15Area.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
+        scale: p15Area.pressed ? 0.90 : (p15Area.containsMouse ? 1.08 : 1.0)
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+        Behavior on color { ColorAnimation { duration: 160 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "15m"
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.weight: Font.DemiBold
+          color: root.islandTextColor
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: p15Area
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (root.timerManager) root.timerManager.start(15 * 60, "15m")
+        }
+      }
+
+      // 25m Preset (Pomodoro hero accent)
+      Rectangle {
+        width: 50
+        height: 32
+        radius: 16
+        anchors.verticalCenter: parent.verticalCenter
+        color: p25Area.containsMouse ? Qt.rgba(1, 1, 1, 0.32) : root.frameConfig.powerButtonActiveBg
+        scale: p25Area.pressed ? 0.90 : (p25Area.containsMouse ? 1.08 : 1.0)
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+        Behavior on color { ColorAnimation { duration: 160 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "25m"
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.weight: Font.Bold
+          color: root.frameConfig.powerButtonActiveIcon
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: p25Area
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (root.timerManager) root.timerManager.start(25 * 60, "Pomodoro")
+        }
+      }
+
+      // 45m Preset
+      Rectangle {
+        width: 48
+        height: 32
+        radius: 16
+        anchors.verticalCenter: parent.verticalCenter
+        color: p45Area.containsMouse ? Qt.rgba(1, 1, 1, 0.28) : root.frameConfig.powerButtonInactiveBg
+        scale: p45Area.pressed ? 0.90 : (p45Area.containsMouse ? 1.08 : 1.0)
+        Behavior on scale { NumberAnimation { duration: 120; easing.type: Easing.OutBack; easing.overshoot: 1.15 } }
+        Behavior on color { ColorAnimation { duration: 160 } }
+
+        Text {
+          anchors.centerIn: parent
+          text: "45m"
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.weight: Font.DemiBold
+          color: root.islandTextColor
+          renderType: Text.NativeRendering
+        }
+
+        MouseArea {
+          id: p45Area
+          anchors.fill: parent
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: if (root.timerManager) root.timerManager.start(45 * 60, "Focus")
+        }
+      }
+    }
+
+    // =========================================================================
+    // Multi-Activity Pagination Capsule Dots (Call • / Media • / Timer •)
+    // Visible on hover whenever multiple activities are available to flip between
+    // =========================================================================
+    Row {
+      id: multiActivityPagination
+      anchors.bottom: parent.bottom
+      anchors.bottomMargin: 4
+      anchors.horizontalCenter: parent.horizontalCenter
+      spacing: 4
+      visible: islandContainer.hoverProgress > 0.3 && root.availablePages.length > 1 && root.notificationProgress < 0.01
+      opacity: islandContainer.hoverProgress
+
+      Repeater {
+        model: root.availablePages.length
+        delegate: Rectangle {
+          required property int index
+          width: root.activePageIndex === index ? 10 : 3
+          height: 3
+          radius: 1.5
+          color: root.activePageIndex === index ? root.islandTextColor : Qt.rgba(root.islandTextColor.r, root.islandTextColor.g, root.islandTextColor.b, 0.35)
+          Behavior on width { NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+          Behavior on color { ColorAnimation { duration: 160 } }
+
+          MouseArea {
+            anchors.fill: parent
+            anchors.margins: -4
+            cursorShape: Qt.PointingHandCursor
+            onClicked: root.activePageIndex = index
+          }
+        }
+      }
+    }
+
+    // =========================================================================
     // Content Layer 4: Dynamic Island Notification Presentation
     // =========================================================================
     Item {
@@ -858,9 +1266,7 @@ Item {
           Rectangle {
             anchors.fill: parent
             radius: width * 0.5
-            color: (root.notificationManager && root.notificationManager.currentUrgency === 2)
-              ? Qt.rgba(1.0, 0.25, 0.25, 0.28)
-              : Qt.rgba(1, 1, 1, 0.16)
+            color: Qt.rgba(1, 1, 1, 0.16)
           }
 
           // Shader-masked image wrapper: guarantees 100% circular clipping for avatars, PFPs, screenshots
@@ -925,9 +1331,7 @@ Item {
               : ((root.notificationManager && root.notificationManager.currentUrgency === 2) ? "󰀦" : "󰂚")
             font.family: root.iconFont
             font.pixelSize: 15
-            color: (root.notificationManager && root.notificationManager.currentUrgency === 2)
-              ? "#ff6b6b"
-              : "#ffffff"
+            color: "#ffffff"
             renderType: Text.NativeRendering
           }
         }
@@ -949,9 +1353,7 @@ Item {
             font.family: root.fontFamily
             font.pixelSize: 13
             font.weight: Font.DemiBold
-            color: (root.notificationManager && root.notificationManager.currentUrgency === 2)
-              ? "#ff6b6b"
-              : "#ffffff"
+            color: "#ffffff"
             elide: Text.ElideRight
             renderType: Text.NativeRendering
             maximumLineCount: 1
@@ -991,25 +1393,28 @@ Item {
     }
 
     // =========================================================================
-    // Content Layer 5: Active Call View (PFP on left, Waveform in center, Cut on right)
+    // Content Layer 5: Active Call View (PFP on left, Name & Waveform in center, Red Cut on right)
     // =========================================================================
     Row {
       id: callContentRow
       anchors.centerIn: parent
-      anchors.verticalCenterOffset: root.borderThickness / 2
-      spacing: 12
+      anchors.verticalCenterOffset: root.availablePages.length > 1 ? (root.borderThickness * 0.5 - 2) : (root.borderThickness / 2)
+      spacing: islandContainer.isHovered ? 14 : 12
+      readonly property bool callPageActive: root.callShowing && (!islandContainer.isHovered || root.currentPageType === "call")
+      opacity: callPageActive ? (islandContainer.isHovered ? Math.min(1.0, (islandContainer.hoverProgress - 0.15) * 1.35) : 1.0) : 0.0
       visible: opacity > 0.01
-      opacity: root.callShowing ? 1.0 : 0.0
 
       Behavior on opacity {
-        NumberAnimation { duration: 250; easing.type: Easing.OutCubic }
+        NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
       }
 
       // Left: Profile Picture (PFP) with circular clipping and active call indicator
       Item {
-        width: 24
-        height: 24
+        width: islandContainer.isHovered ? 34 : 24
+        height: width
         anchors.verticalCenter: parent.verticalCenter
+
+        Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
 
         Rectangle {
           anchors.fill: parent
@@ -1053,15 +1458,15 @@ Item {
           visible: callAvatarImg.status !== Image.Ready
           text: root.callApp === "discord" ? "\uF392" : (root.callApp === "whatsapp" ? "\uF232" : "\uF095")
           font.family: root.iconFont
-          font.pixelSize: 13
+          font.pixelSize: islandContainer.isHovered ? 16 : 13
           color: "#ffffff"
         }
 
         // Green active call dot
         Rectangle {
-          width: 7
-          height: 7
-          radius: 3.5
+          width: islandContainer.isHovered ? 9 : 7
+          height: width
+          radius: width / 2
           color: "#23a55a"
           border.color: root.islandColor
           border.width: 1.5
@@ -1070,10 +1475,40 @@ Item {
         }
       }
 
-      // Center: The animated waveform visualizer
+      // Center: Name & Waveform in expanded view
+      Column {
+        anchors.verticalCenter: parent.verticalCenter
+        spacing: 3
+        visible: islandContainer.isHovered
+
+        Text {
+          anchors.horizontalCenter: parent.horizontalCenter
+          text: root.callCaller ? root.callCaller : (root.callApp ? (root.callApp.charAt(0).toUpperCase() + root.callApp.slice(1) + " Call") : "Voice Call")
+          color: "#ffffff"
+          font.family: root.fontFamily
+          font.pixelSize: 12
+          font.weight: Font.DemiBold
+          renderType: Text.NativeRendering
+          maximumLineCount: 1
+          elide: Text.ElideRight
+        }
+
+        MediaWaveform {
+          anchors.horizontalCenter: parent.horizontalCenter
+          active: root.inCall
+          barCount: 14
+          barWidth: 3.0
+          barSpacing: 3.0
+          maxHeight: 12
+          minHeight: 2.0
+        }
+      }
+
+      // Center: Waveform in resting view
       MediaWaveform {
         id: callWaveform
         anchors.verticalCenter: parent.verticalCenter
+        visible: !islandContainer.isHovered
         active: root.inCall
         barCount: 16
         barWidth: 3.0
@@ -1082,27 +1517,29 @@ Item {
         minHeight: 2.0
       }
 
-      // Right: Tactile End / Cut Call Button
+      // Right: Tactile End / Cut Call Button (Red Hero Button when expanded)
       Rectangle {
         id: cutBtn
-        width: 24
-        height: 24
-        radius: 12
+        width: islandContainer.isHovered ? 34 : 24
+        height: width
+        radius: width / 2
         anchors.verticalCenter: parent.verticalCenter
-        color: "transparent"
+        color: islandContainer.isHovered ? (cutHover.hovered ? "#f44336" : "#e53935") : "transparent"
+
+        Behavior on width { NumberAnimation { duration: 220; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+        Behavior on color { ColorAnimation { duration: 150 } }
 
         scale: cutTap.pressed ? 0.90 : (cutHover.hovered ? 1.08 : 1.0)
         Behavior on scale {
           NumberAnimation { duration: 160; easing.type: Easing.OutBack; easing.overshoot: 1.15 }
         }
-        Behavior on color { ColorAnimation { duration: 150 } }
 
         Text {
           anchors.centerIn: parent
           text: "\u{F03F6}" // nf-md-phone_hangup
           font.family: root.iconFont
-          font.pixelSize: 20
-          color: cutHover.hovered ? Qt.rgba(1, 1, 1, 0.75) : "#ffffff"
+          font.pixelSize: islandContainer.isHovered ? 16 : 20
+          color: "#ffffff"
           renderType: Text.NativeRendering
         }
 

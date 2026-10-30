@@ -420,6 +420,22 @@ Item {
       .concat(sortByRecent(prefixMatches))
       .concat(sortByRecent(fuzzyMatches))
 
+    // Check if query is a timer command (e.g. "timer 25m", "timer 10", "t 5m", "timer 1h")
+    var timerMatch = q.match(/^(?:timer|t)\s+(\d+(?:\s*[smh])?)(?:\s+(.*))?$/i)
+    if (timerMatch) {
+      var durationStr = timerMatch[1].trim()
+      var timerLabel = timerMatch[2] ? timerMatch[2].trim() : ""
+      result.unshift({
+        id: "timer_" + durationStr,
+        name: "Start Timer: " + durationStr + (timerLabel ? " (" + timerLabel + ")" : ""),
+        subtext: "Live countdown activity in Dynamic Island",
+        icon: "preferences-system-time",
+        isTimer: true,
+        durationStr: durationStr,
+        timerLabel: timerLabel
+      })
+    }
+
     // If query has non-empty text, append "Run Command" option
     if (q.length > 0) {
       result.push({
@@ -485,6 +501,11 @@ Item {
       recordRecentApp(item.id)
     }
     root.close()
+
+    if (item.isTimer) {
+      Quickshell.execDetached(["omarchy-shell", "lumania.island", "timer", item.durationStr, item.timerLabel || ""])
+      return
+    }
 
     if (item.isCommand) {
       Quickshell.execDetached(["bash", "-c", item.command])
