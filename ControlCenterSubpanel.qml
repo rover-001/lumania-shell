@@ -344,6 +344,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText // untrusted external text: never parse as markup
                 text: modelData.ssid
                 font.family: root.fontFamily
                 font.pixelSize: 11
@@ -462,6 +463,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText // untrusted external text: never parse as markup
                 text: modelData.name
                 font.family: root.fontFamily
                 font.pixelSize: 11

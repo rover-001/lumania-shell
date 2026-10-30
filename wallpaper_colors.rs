@@ -86,7 +86,16 @@ fn find_wallpaper() -> Option<PathBuf> {
 
 fn extract_colors_from_wallpaper(wp_path: &Path) -> Result<String, String> {
     // Ultra-fast path: return cached JSON if wallpaper path and mtime are unchanged (<1ms)
-    let cache_file = PathBuf::from("/tmp/lumania_wallpaper_cache.json");
+    // Per-user runtime dir (0700): a fixed /tmp path could be pre-created or symlinked
+    // by another local account. No runtime dir means no cache.
+    let cache_file = env::var_os("XDG_RUNTIME_DIR")
+        .filter(|d| !d.is_empty())
+        .map(|d| PathBuf::from(d).join("lumania_wallpaper_cache.json"));
+    if let Ok(meta) = fs::symlink_metadata("/tmp/lumania_wallpaper_cache.json") {
+        if !meta.file_type().is_symlink() {
+            let _ = fs::remove_file("/tmp/lumania_wallpaper_cache.json");
+        }
+    }
     let current_mtime_secs = fs::metadata(wp_path)
         .and_then(|m| m.modified())
         .map(|t| t.duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs())
@@ -94,7 +103,7 @@ fn extract_colors_from_wallpaper(wp_path: &Path) -> Result<String, String> {
 
     let wp_str = wp_path.to_string_lossy();
     if current_mtime_secs > 0 {
-        if let Ok(cache_content) = fs::read_to_string(&cache_file) {
+        if let Some(Ok(cache_content)) = cache_file.as_ref().map(fs::read_to_string) {
             if let Some((cached_path, rest)) = cache_content.split_once("||") {
                 if let Some((cached_mtime, json)) = rest.split_once("||") {
                     if cached_path == wp_str && cached_mtime == current_mtime_secs.to_string() {
@@ -213,7 +222,9 @@ fn extract_colors_from_wallpaper(wp_path: &Path) -> Result<String, String> {
 
     // Save to cache
     if current_mtime_secs > 0 {
-        let _ = fs::write(&cache_file, format!("{}||{}||{}", wp_str, current_mtime_secs, json));
+        if let Some(cache_file) = cache_file.as_ref() {
+            let _ = fs::write(cache_file, format!("{}||{}||{}", wp_str, current_mtime_secs, json));
+        }
     }
 
     Ok(json)

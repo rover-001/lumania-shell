@@ -780,6 +780,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText // untrusted external text: never parse as markup
               anchors.centerIn: parent
               visible: trayIcon.status !== Image.Ready
               text: (traySlot.modelData.title && traySlot.modelData.title.length > 0)
@@ -959,6 +960,7 @@ Item {
         }
 
         Text {
+          textFormat: Text.PlainText // untrusted external text: never parse as markup
           anchors.verticalCenter: parent.verticalCenter
           anchors.left: parent.left
           anchors.leftMargin: 6
@@ -1037,6 +1039,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText // untrusted external text: never parse as markup
                 visible: !menuRow.modelData.isSeparator
                 anchors.verticalCenter: parent.verticalCenter
                 anchors.left: parent.left

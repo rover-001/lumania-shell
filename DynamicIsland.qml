@@ -940,6 +940,7 @@ Item {
 
           // Row 1: Headline
           Text {
+            textFormat: Text.PlainText // untrusted external text: never parse as markup
             id: notifSummaryText
             Layout.fillWidth: true
             text: (root.notificationManager && root.notificationManager.currentSummary.length > 0)
@@ -958,6 +959,7 @@ Item {
 
           // Row 2: Message body details in clean readable high-contrast tone
           Text {
+            textFormat: Text.PlainText // untrusted external text: never parse as markup
             id: notifBodyText
             Layout.fillWidth: true
             visible: text.length > 0

@@ -329,6 +329,7 @@ Item {
             spacing: 2
 
             Text {
+              textFormat: Text.PlainText // untrusted external text: never parse as markup
               text: root.wifiData.enabled
                 ? (root.wifiData.connected ? (root.wifiData.ssid || "Connected") : (root.wifiData.networks.length > 0 ? "Networks Available" : "Searching for Wi-Fi..."))
                 : "Wi-Fi Off"
@@ -447,6 +448,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText // untrusted external text: never parse as markup
                 text: modelData.ssid
                 font.family: root.fontFamily
                 font.pixelSize: 11
@@ -553,6 +555,7 @@ Item {
             spacing: 2
 
             Text {
+              textFormat: Text.PlainText // untrusted external text: never parse as markup
               text: root.btData.enabled
                 ? (btView.connectedDev
                     ? btView.connectedDev.name
@@ -659,6 +662,7 @@ Item {
               }
 
               Text {
+                textFormat: Text.PlainText // untrusted external text: never parse as markup
                 text: modelData.name
                 font.family: root.fontFamily
                 font.pixelSize: 11
@@ -752,6 +756,7 @@ Item {
             }
 
             Text {
+              textFormat: Text.PlainText // untrusted external text: never parse as markup
               text: "Resolver: " + (root.dnsData.current || "8.8.8.8")
               font.family: root.fontFamily
               font.pixelSize: 11

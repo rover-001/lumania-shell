@@ -1244,6 +1244,7 @@ Item {
 
                 // App Name Label (Centered, Crisp, Elided)
                 Text {
+                  textFormat: Text.PlainText // untrusted external text: never parse as markup
                   Layout.fillWidth: true
                   text: modelData.name || ""
                   font.family: root.fontFamily
