@@ -210,7 +210,7 @@ fn extract_colors_from_wallpaper(wp_path: &Path) -> Result<String, String> {
 
     // Complementary accent (180 deg opposite hue)
     let comp_h = (best.h + 0.5) % 1.0;
-    let (cr, cg, cb) = hsv_to_rgb(comp_h, best.s.clamp(0.35, 0.75), best.v.clamp(0.55, 0.90));
+    let (cr, cg, cb) = hsv_to_rgb(comp_h, if best.s < 0.10 { 0.0 } else { best.s.clamp(0.35, 0.75) }, best.v.clamp(0.55, 0.90));
     let comp_hex = format!("#{:02x}{:02x}{:02x}", (cr * 255.0) as u8, (cg * 255.0) as u8, (cb * 255.0) as u8);
 
     let wp_filename = wp_path.file_name().and_then(|f| f.to_str()).unwrap_or("unknown");
@@ -234,7 +234,8 @@ fn score_candidate(c: &ColorCand) -> f32 {
     if c.v < 0.18 || (c.s < 0.10 && c.v > 0.88) {
         return 0.01;
     }
-    let s_factor = (c.s / 0.55).min(1.2);
+    // Floor keeps mid-tone greys of monochrome wallpapers ahead of near-black/white (0.01)
+    let s_factor = (c.s / 0.55).clamp(0.05, 1.2);
     let v_dist = (c.v - 0.62).abs();
     let v_factor = (1.0 - (v_dist * 1.4)).max(0.15);
     let pop = (c.count as f32).powf(0.32);
