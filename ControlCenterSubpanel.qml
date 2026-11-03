@@ -70,7 +70,7 @@ Item {
   // Actions requested upwards (the control center owns the backend process)
   signal toggleWifiRequested()
   signal rescanWifiRequested()
-  signal connectWifiRequested(string ssid)
+  signal connectWifiRequested(string ssid, string password)
   signal toggleBluetoothRequested()
   signal connectBluetoothRequested(string mac)
   signal disconnectBluetoothRequested(string mac)
@@ -84,6 +84,87 @@ Item {
   function close() {
     root.isPinned = false
     root.isOpen = false
+    root.resetWifiPassword()
+  }
+
+  // -------------------------------------------------------------------------
+  // Wi-Fi password entry
+  // -------------------------------------------------------------------------
+  // Secured networks without a stored profile have no key to activate with, so
+  // the row opens this inline prompt instead of firing a doomed connect.
+  property bool passwordPromptOpen: false
+  property bool passwordBusy: false
+  property string pendingSsid: ""
+  property string passwordText: ""
+  property string passwordError: ""
+
+  // Read by the parent so the layer surface can take keyboard focus while the
+  // field is on screen (and so hover-close holds off mid-typing).
+  readonly property bool isTextInputActive: root.passwordPromptOpen
+    && root.isOpen && root.activeTab === "wifi"
+
+  function resetWifiPassword() {
+    root.passwordPromptOpen = false
+    root.passwordBusy = false
+    root.pendingSsid = ""
+    if (wifiPasswordInput) wifiPasswordInput.text = ""
+    root.passwordText = ""
+    root.passwordError = ""
+  }
+
+  function beginWifiConnect(net) {
+    var secured = Boolean(net.security && net.security.length > 0)
+    root.pendingSsid = net.ssid
+    if (wifiPasswordInput) wifiPasswordInput.text = ""
+    root.passwordText = ""
+    root.passwordError = ""
+    root.passwordBusy = false
+    if (secured && !Boolean(net.saved)) {
+      root.passwordPromptOpen = true
+      wifiPasswordInput.forceActiveFocus()
+    } else {
+      root.passwordPromptOpen = false
+      root.passwordBusy = true
+      root.connectWifiRequested(net.ssid, "")
+    }
+  }
+
+  function submitWifiPassword() {
+    if (root.passwordBusy || root.passwordText.length === 0) return
+    root.passwordError = ""
+    root.passwordBusy = true
+    root.connectWifiRequested(root.pendingSsid, root.passwordText)
+  }
+
+  // Called by the owner of the backend process once nmcli has finished.
+  function wifiConnectFinished(ok, message, ssid) {
+    root.passwordBusy = false
+    // The panel may have been dismissed while nmcli was running; never
+    // resurrect a hidden prompt (it would also steal keyboard focus).
+    if (!root.isOpen || root.activeTab !== "wifi") {
+      root.resetWifiPassword()
+      return
+    }
+    if (ok) {
+      root.passwordPromptOpen = false
+      root.pendingSsid = ""
+      if (wifiPasswordInput) wifiPasswordInput.text = ""
+      root.passwordText = ""
+      root.passwordError = ""
+    } else {
+      // A saved profile with a stale key lands here too: reopen the field so
+      // the user can enter the new passphrase.
+      if (ssid) root.pendingSsid = ssid
+      root.passwordPromptOpen = true
+      if (wifiPasswordInput) wifiPasswordInput.text = ""
+      root.passwordText = ""
+      root.passwordError = message || "Could not connect"
+      wifiPasswordInput.forceActiveFocus()
+    }
+  }
+
+  onActiveTabChanged: {
+    if (root.activeTab !== "wifi") root.resetWifiPassword()
   }
 
   // Driver value for iOS Fluid Motion: 0.0 (closed) -> 1.0 (fully bloomed)
@@ -142,9 +223,11 @@ Item {
       ? root.btData.devices
       : root.cachedBtDevices
   }
-  readonly property int activeRowCount: root.activeTab === "wifi"
-    ? root.wifiNetworks.length
-    : (root.activeTab === "dns" ? root.dnsPresets.length : root.btDevices.length)
+  readonly property int activeRowCount: root.passwordPromptOpen
+    ? 4
+    : (root.activeTab === "wifi"
+        ? root.wifiNetworks.length
+        : (root.activeTab === "dns" ? root.dnsPresets.length : root.btDevices.length))
 
   // Height follows the row count so the panel never carries empty space.
   // Critically damped: the mask window must never overshoot past the bounds.
@@ -300,7 +383,7 @@ Item {
           anchors.fill: parent
           spacing: 2
           boundsBehavior: Flickable.StopAtBounds
-          visible: root.wifiData.enabled
+          visible: root.wifiData.enabled && !root.passwordPromptOpen
 
           model: root.wifiNetworks
 
@@ -376,7 +459,7 @@ Item {
               id: netTap
               onTapped: {
                 if (!modelData.active) {
-                  root.connectWifiRequested(modelData.ssid)
+                  root.beginWifiConnect(modelData)
                 }
               }
             }
@@ -388,7 +471,7 @@ Item {
           anchors.centerIn: parent
           width: parent.width
           horizontalAlignment: Text.AlignHCenter
-          visible: !root.wifiData.enabled || wifiList.count === 0
+          visible: !root.passwordPromptOpen && (!root.wifiData.enabled || wifiList.count === 0)
           text: !root.wifiData.enabled
             ? "Wi-Fi off"
             : (root.isRescanningWifi ? "Scanning for networks..."
@@ -396,6 +479,158 @@ Item {
           font.family: root.fontFamily
           font.pixelSize: 11
           color: Qt.rgba(255, 255, 255, 0.60)
+        }
+
+        // ---------------------------------------------------------------------
+        // Inline password entry for secured networks with no stored profile
+        // ---------------------------------------------------------------------
+        ColumnLayout {
+          id: wifiPasswordPrompt
+          anchors.left: parent.left
+          anchors.right: parent.right
+          anchors.top: parent.top
+          spacing: 6
+          visible: root.passwordPromptOpen
+
+          RowLayout {
+            spacing: 6
+
+            Text {
+              text: "󰌾"
+              font.family: root.iconFont
+              font.pixelSize: 11
+              color: Qt.rgba(255, 255, 255, 0.70)
+            }
+
+            Text {
+              textFormat: Text.PlainText // untrusted external text: never parse as markup
+              text: root.pendingSsid
+              font.family: root.fontFamily
+              font.pixelSize: 11
+              font.weight: Font.DemiBold
+              color: "#ffffff"
+              elide: Text.ElideRight
+              Layout.fillWidth: true
+            }
+          }
+
+          Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 30
+            radius: 6
+            color: Qt.rgba(255, 255, 255, 0.14)
+            border.width: 1
+            border.color: wifiPasswordInput.activeFocus
+              ? Qt.rgba(255, 255, 255, 0.38)
+              : Qt.rgba(255, 255, 255, 0.18)
+
+            Behavior on border.color { ColorAnimation { duration: 140; easing.type: Easing.OutCubic } }
+
+            TextInput {
+              id: wifiPasswordInput
+              anchors.fill: parent
+              anchors.leftMargin: 8
+              anchors.rightMargin: 8
+              verticalAlignment: TextInput.AlignVCenter
+              echoMode: TextInput.Password
+              passwordCharacter: "•"
+              selectByMouse: true
+              clip: true
+              focus: root.passwordPromptOpen
+              enabled: !root.passwordBusy
+              font.family: root.fontFamily
+              font.pixelSize: 11
+              color: "#ffffff"
+              selectionColor: Qt.rgba(255, 255, 255, 0.35)
+              selectedTextColor: "#ffffff"
+
+              onTextChanged: root.passwordText = text
+              onAccepted: root.submitWifiPassword()
+
+              Keys.onReturnPressed: root.submitWifiPassword()
+              Keys.onEnterPressed: root.submitWifiPassword()
+              Keys.onEscapePressed: root.resetWifiPassword()
+
+              Text {
+                anchors.fill: parent
+                verticalAlignment: Text.AlignVCenter
+                text: root.passwordBusy ? "Connecting…" : "Password"
+                font.family: root.fontFamily
+                font.pixelSize: 11
+                color: Qt.rgba(255, 255, 255, 0.55)
+                visible: !wifiPasswordInput.text
+              }
+            }
+          }
+
+          Text {
+            Layout.fillWidth: true
+            textFormat: Text.PlainText
+            visible: root.passwordError.length > 0
+            text: root.passwordError
+            font.family: root.fontFamily
+            font.pixelSize: 10
+            color: Qt.rgba(255, 255, 255, 0.90)
+            elide: Text.ElideRight
+          }
+
+          RowLayout {
+            spacing: 6
+
+            Item { Layout.fillWidth: true }
+
+            Rectangle {
+              Layout.preferredHeight: 24
+              Layout.preferredWidth: 56
+              radius: 12
+              color: cancelPasswordHover.hovered
+                ? Qt.rgba(255, 255, 255, 0.16)
+                : "transparent"
+
+              HoverHandler { id: cancelPasswordHover }
+
+              Text {
+                anchors.centerIn: parent
+                text: "Cancel"
+                font.family: root.fontFamily
+                font.pixelSize: 10
+                font.weight: Font.DemiBold
+                color: Qt.rgba(255, 255, 255, 0.75)
+              }
+
+              TapHandler {
+                onTapped: root.resetWifiPassword()
+              }
+            }
+
+            Rectangle {
+              id: joinWifiButton
+              Layout.preferredHeight: 24
+              Layout.preferredWidth: 56
+              radius: 12
+              readonly property bool canJoin: root.passwordText.length > 0 && !root.passwordBusy
+              color: joinWifiButton.canJoin
+                ? (joinPasswordHover.hovered ? Qt.rgba(255, 255, 255, 0.88) : "#ffffff")
+                : Qt.rgba(255, 255, 255, 0.16)
+
+              HoverHandler { id: joinPasswordHover }
+
+              Text {
+                anchors.centerIn: parent
+                text: "Join"
+                font.family: root.fontFamily
+                font.pixelSize: 10
+                font.weight: Font.Bold
+                color: joinWifiButton.canJoin
+                  ? root.notchColor
+                  : Qt.rgba(255, 255, 255, 0.60)
+              }
+
+              TapHandler {
+                onTapped: root.submitWifiPassword()
+              }
+            }
+          }
         }
       }
     }

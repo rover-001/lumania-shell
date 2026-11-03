@@ -91,6 +91,8 @@ Item {
     repeat: false
     onTriggered: {
       var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
+      // Never pull the panel out from under a password being typed.
+      if (root.statusTextInputActive) return
       if (statusSubpanel && statusSubpanel.isOpen && !statusSubpanel.isPinned
           && !notchHover.hovered && !subpanelHovered) {
         statusSubpanel.isOpen = false
@@ -109,7 +111,7 @@ Item {
   function syncPointerWatchdog() {
     var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
     var inside = notchHover.hovered || subpanelHovered || cornerTriggerHover.hovered
-    if (inside) {
+    if (inside || root.statusTextInputActive) {
       root.pointerEngaged = true
       root.outsideTicks = 0
       return
@@ -219,6 +221,14 @@ Item {
   property double lastBtScan: 0
   property string debugTab: ""
 
+  // In-flight Wi-Fi connect started from the status subpanel. The password (if
+  // any) is handed to the backend over stdin so it stays out of argv.
+  property var pendingWifiConnect: null
+  property string pendingWifiPassword: ""
+
+  // True while the subpanel's password field needs the surface's keyboard.
+  readonly property bool statusTextInputActive: Boolean(statusSubpanel && statusSubpanel.isTextInputActive)
+
   Process {
     id: statusProc
     command: [root.backendScript]
@@ -245,7 +255,26 @@ Item {
 
   Process {
     id: statusActionProc
-    onExited: root.refreshStatus()
+    onStarted: {
+      if (root.pendingWifiPassword.length > 0) {
+        statusActionProc.write(root.pendingWifiPassword + "\n")
+        root.pendingWifiPassword = ""
+      }
+    }
+    onExited: function(exitCode, exitStatus) {
+      var pending = root.pendingWifiConnect
+      root.pendingWifiConnect = null
+      root.pendingWifiPassword = ""
+      statusActionProc.stdinEnabled = false
+      if (pending && statusSubpanel) {
+        statusSubpanel.wifiConnectFinished(
+          exitCode === 0,
+          exitCode === 0 ? "" : "Could not connect. Check the password.",
+          pending.ssid
+        )
+      }
+      root.refreshStatus()
+    }
   }
 
   function runStatusAction(args) {
@@ -274,9 +303,16 @@ Item {
     runStatusAction(["--rescan-wifi"])
   }
 
-  function connectWifi(ssid) {
+  function connectWifi(ssid, password) {
     if (!ssid) return
-    runStatusAction(["--connect-wifi", ssid])
+    var secret = password || ""
+    root.pendingWifiConnect = { ssid: ssid }
+    root.pendingWifiPassword = secret
+    statusActionProc.stdinEnabled = secret.length > 0
+    statusActionProc.command = secret.length > 0
+      ? [root.backendScript, "--connect-wifi", ssid, "--password-stdin"]
+      : [root.backendScript, "--connect-wifi", ssid]
+    statusActionProc.running = true
   }
 
   function connectBluetooth(mac) {
@@ -351,7 +387,7 @@ Item {
   }
 
   function closeStatusTab() {
-    if (!statusSubpanel || statusSubpanel.isPinned) return
+    if (!statusSubpanel || statusSubpanel.isPinned || root.statusTextInputActive) return
     if (statusSubpanel.isOpen) statusSubpanel.isOpen = false
   }
 
@@ -690,7 +726,9 @@ Item {
           // leaves. The grace timer exists only to let the cursor cross the gap
           // into the status subpanel, so skip it when no subpanel is involved.
           var subpanelHovered = Boolean(statusSubpanel && statusSubpanel.isHovered)
-          if ((statusSubpanel && statusSubpanel.isOpen) || subpanelHovered) {
+          if (root.statusTextInputActive) {
+            hoverCloseTimer.stop()
+          } else if ((statusSubpanel && statusSubpanel.isOpen) || subpanelHovered) {
             hoverCloseTimer.restart()
           } else {
             hoverCloseTimer.stop()
@@ -1677,7 +1715,7 @@ Item {
     onSetDnsRequested: function(preset) { root.setDns(preset) }
     onToggleWifiRequested: root.toggleWifi()
     onRescanWifiRequested: root.rescanWifi()
-    onConnectWifiRequested: function(ssid) { root.connectWifi(ssid) }
+    onConnectWifiRequested: function(ssid, password) { root.connectWifi(ssid, password) }
     onToggleBluetoothRequested: root.toggleBluetooth()
     onConnectBluetoothRequested: function(mac) { root.connectBluetooth(mac) }
     onDisconnectBluetoothRequested: function(mac) { root.disconnectBluetooth(mac) }

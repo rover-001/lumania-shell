@@ -55,6 +55,23 @@ struct WifiNetwork {
     signal: u32,
     security: String,
     active: bool,
+    saved: bool,
+}
+
+// Names of NetworkManager connection profiles that hold a stored Wi-Fi key.
+// A saved profile can be activated without asking for the password again.
+fn get_saved_wifi_profiles() -> HashSet<String> {
+    let mut saved = HashSet::new();
+    let out = run_cmd(&["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"]);
+    for line in out.lines() {
+        if let Some((name, kind)) = line.rsplit_once(':') {
+            if kind.trim() == "802-11-wireless" {
+                let name = name.replace("\\:", ":").replace("\\\\", "\\");
+                saved.insert(name);
+            }
+        }
+    }
+    saved
 }
 
 struct WifiStatus {
@@ -93,6 +110,7 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
     }
 
     let mut networks: Vec<WifiNetwork> = Vec::new();
+    let saved_profiles = get_saved_wifi_profiles();
     let mut seen: HashSet<String> = HashSet::new();
     let mut connected_ssid = String::new();
     let mut connected_signal = 0;
@@ -125,11 +143,13 @@ fn get_wifi_status(iface: &str) -> WifiStatus {
 
             if !seen.contains(&ssid) {
                 seen.insert(ssid.clone());
+                let saved = saved_profiles.contains(&ssid);
                 networks.push(WifiNetwork {
                     ssid,
                     signal,
                     security: sec,
                     active: is_active,
+                    saved,
                 });
             }
         }
@@ -410,6 +430,23 @@ fn main() {
     let args: Vec<String> = env::args().collect();
     let iface = get_active_wifi_interface();
 
+    // Activate a Wi-Fi network, optionally with a passphrase read from stdin so
+    // the secret never appears in this helper's own argv. The exit code is
+    // forwarded to the shell so the UI can tell a wrong key from a success.
+    let connect_wifi = |ssid: &str, password: Option<String>| -> i32 {
+        let mut cmd = Command::new("nmcli");
+        cmd.args(["dev", "wifi", "connect", ssid]);
+        if let Some(pw) = password {
+            if !pw.is_empty() {
+                cmd.arg("password").arg(pw);
+            }
+        }
+        match cmd.status() {
+            Ok(status) => status.code().unwrap_or(1),
+            Err(_) => 1,
+        }
+    };
+
     if args.len() > 1 {
         let cmd = &args[1];
         match cmd.as_str() {
@@ -425,7 +462,14 @@ fn main() {
             }
             "--connect-wifi" => {
                 if args.len() > 2 {
-                    let _ = Command::new("nmcli").args(["dev", "wifi", "connect", &args[2]]).status();
+                    let password = if args.len() > 3 && args[3] == "--password-stdin" {
+                        let mut line = String::new();
+                        let _ = std::io::stdin().read_line(&mut line);
+                        Some(line.trim_end_matches(['\r', '\n']).to_string())
+                    } else {
+                        None
+                    };
+                    std::process::exit(connect_wifi(&args[2], password));
                 }
                 return;
             }
@@ -520,11 +564,12 @@ fn main() {
     for (i, net) in wifi.networks.iter().take(12).enumerate() {
         if i > 0 { json.push(','); }
         json.push_str(&format!(
-            "{{\"ssid\":\"{}\",\"signal\":{},\"security\":\"{}\",\"active\":{}}}",
+            "{{\"ssid\":\"{}\",\"signal\":{},\"security\":\"{}\",\"active\":{},\"saved\":{}}}",
             json_escape(&net.ssid),
             net.signal,
             json_escape(&net.security),
-            net.active
+            net.active,
+            net.saved
         ));
     }
     json.push_str("]},");

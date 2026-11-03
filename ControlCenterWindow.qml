@@ -1,5 +1,6 @@
 import QtQuick
 import Quickshell
+import Quickshell.Hyprland
 import Quickshell.Io
 import Quickshell.Wayland
 import qs.Ui
@@ -87,6 +88,13 @@ Item {
         WlrLayershell.namespace: "lumania-control-center"
         WlrLayershell.layer: WlrLayer.Overlay
         exclusionMode: ExclusionMode.Ignore
+
+        // The Wi-Fi password field needs real keyboard focus; everything else
+        // in this surface stays pointer-only so typing returns to the app.
+        readonly property bool isCurrentScreen: !Hyprland.focusedMonitor || (modelData && modelData.name === Hyprland.focusedMonitor.name)
+        WlrLayershell.keyboardFocus: (controlNotch.statusTextInputActive && isCurrentScreen)
+          ? WlrKeyboardFocus.Exclusive
+          : WlrKeyboardFocus.None
 
         mask: Region {
           Region {
