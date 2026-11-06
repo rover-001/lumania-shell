@@ -59,6 +59,11 @@ Item {
     if (!root.isOpen) {
       root.isPinned = false
       root.isHoverOpen = false
+      root.userNavigated = false
+    } else {
+      root.userNavigated = false
+      root.syncActiveWallpaper()
+      root.refreshWallpapers()
     }
   }
 
@@ -66,6 +71,8 @@ Item {
   // a pointer leave can retract the panel without a stuck host binding.
   function hoverOpen() {
     root.isHoverOpen = true
+    root.userNavigated = false
+    root.syncActiveWallpaper()
     root.refreshWallpapers()
     root.refreshMotionPreference()
   }
@@ -73,7 +80,9 @@ Item {
   // Explicit open (IPC / keybind): local latch + host state + keyboard focus.
   function open() {
     root.isHoverOpen = true
+    root.userNavigated = false
     root.openRequested()
+    root.syncActiveWallpaper()
     root.refreshWallpapers()
     root.refreshMotionPreference()
   }
@@ -81,6 +90,7 @@ Item {
   function close() {
     root.isPinned = false
     root.isHoverOpen = false
+    root.userNavigated = false
     root.closeRequested()
   }
 
@@ -89,6 +99,7 @@ Item {
   function hoverClose() {
     if (root.isPinned || root.isOpen) return
     root.isHoverOpen = false
+    root.userNavigated = false
   }
 
   function armHoverClose() {
@@ -113,6 +124,10 @@ Item {
   // -------------------------------------------------------------------------
   property var wallpapers: []       // [{ path, name }]
   property int selectedIndex: 0
+  // Leftmost catalogue index in the visible window. Stepping past the far edge
+  // advances it one slot so the next wallpaper arrives from that side while
+  // the one on the opposite side leaves.
+  property int windowStart: 0
   property string selectedPath: ""
   property string activePath: ""
   property string pendingPath: ""
@@ -120,6 +135,133 @@ Item {
   property bool userNavigated: false
   property double lastScanAt: 0
   property bool scanQueued: false
+  // Catalogue epoch the running scan was started for; a scan that finishes
+  // after a theme switch is discarded instead of publishing the old theme.
+  property int scanEpoch: -1
+
+  // A theme switch swaps ~/.local/state/omarchy/current/theme in place, so
+  // every background keeps the SAME absolute path while its bytes change.
+  // Anything keyed by path (decode twins, thumbnail pixmaps, pending applies)
+  // is therefore stale after a switch, even though the filenames look right.
+  // omarchy rewrites theme.name + theme.generation on every switch; watching
+  // both (plus a slow backup poll for filesystems that drop inotify events)
+  // invalidates the epoch and rebuilds the catalogue for the new theme.
+  readonly property string themeNamePath: (Quickshell.env("HOME") || "/home/rover")
+    + "/.local/state/omarchy/current/theme.name"
+  readonly property string themeGenerationPath: (Quickshell.env("HOME") || "/home/rover")
+    + "/.local/state/omarchy/current/theme.generation"
+  property string lastThemeName: ""
+  property string lastThemeGeneration: ""
+  // Bumped on every theme switch; part of every thumbnail URL and of the
+  // decode-cache key so stale pixmaps/twins can never be reused.
+  property int catalogueEpoch: 0
+  property bool themeSwitchPending: false
+
+  function noteThemeName(raw) {
+    var name = String(raw || "").trim()
+    if (!name || name === root.lastThemeName) return
+    var initial = root.lastThemeName === ""
+    root.lastThemeName = name
+    if (!initial) root.markThemeSwitch("name " + name)
+  }
+
+  function noteThemeGeneration(raw) {
+    var gen = String(raw || "").trim()
+    if (!gen || gen === root.lastThemeGeneration) return
+    var initial = root.lastThemeGeneration === ""
+    root.lastThemeGeneration = gen
+    if (!initial) root.markThemeSwitch("generation " + gen)
+  }
+
+  // The two markers are written a few milliseconds apart; coalesce them into
+  // one invalidation so the catalogue is rebuilt exactly once per switch.
+  function markThemeSwitch(reason) {
+    if (!root.themeSwitchPending) {
+      root.themeSwitchPending = true
+      console.log("[LUMANIA-THEME] switch detected:", reason)
+    }
+    themeSwitchTimer.restart()
+  }
+
+  Timer {
+    id: themeSwitchTimer
+    interval: 150
+    repeat: false
+    onTriggered: root.applyThemeSwitch()
+  }
+
+  property int themeSettleTicks: 0
+
+  Timer {
+    id: themeSettleTimer
+    interval: 500
+    repeat: true
+    onTriggered: {
+      root.themeSettleTicks += 1
+      root.syncActiveWallpaper()
+      root.refreshWallpapers(true)
+      if (root.themeSettleTicks >= 4) {
+        themeSettleTimer.stop()
+      }
+    }
+  }
+
+  function applyThemeSwitch() {
+    root.themeSwitchPending = false
+    // Drop everything resolved against the previous theme before rescanning:
+    // an in-flight apply or a decode twin would otherwise repaint the old
+    // wallpaper on top of the new theme.
+    root.catalogueEpoch += 1
+    root.fastPaths = ({})
+    root.cacheWarmKey = ""
+    root.wallpapers = []
+    root.selectedIndex = 0
+    root.windowStart = 0
+    root.activePath = ""
+    root.selectedPath = ""
+    root.pendingPath = ""
+    root.pendingStep = 0
+    root.applyQueued = ""
+    root.userNavigated = false
+    root.lastScanAt = 0
+    applyDebounce.stop()
+    root.refreshWallpapers(true)
+    root.syncActiveWallpaper()
+    // Multi-tick settle ensures we catch background symlink even during
+    // slower intro/transition periods.
+    root.themeSettleTicks = 0
+    themeSettleTimer.restart()
+  }
+
+  FileView {
+    id: themeWatch
+    path: root.themeNamePath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.noteThemeName(themeWatch.text())
+    onFileChanged: themeWatch.reload()
+  }
+
+  FileView {
+    id: themeGenerationWatch
+    path: root.themeGenerationPath
+    watchChanges: true
+    atomicWrites: true
+    printErrors: false
+    onLoaded: root.noteThemeGeneration(themeGenerationWatch.text())
+    onFileChanged: themeGenerationWatch.reload()
+  }
+
+  Timer {
+    interval: 1000
+    repeat: true
+    running: true
+    onTriggered: {
+      themeWatch.reload()
+      themeGenerationWatch.reload()
+    }
+  }
 
   function baseName(path) {
     var parts = String(path || "").split("/")
@@ -130,21 +272,33 @@ Item {
     return path ? ("file://" + path) : ""
   }
 
+  // Thumbnail URL: the epoch is a cache-buster, so a theme that ships a file
+  // with the same name (and therefore the same path) still repaints its thumb.
+  function thumbUrl(path) {
+    if (!path) return ""
+    return root.fileUrl(root.fastPathFor(path)) + "?v=" + root.catalogueEpoch
+  }
+
   function shellQuote(value) {
     return "'" + String(value).replace(/'/g, "'\\''") + "'"
   }
 
   function scanDirs() {
-    var home = Quickshell.env("HOME")
-    var raw = root.frameConfig.wallpaperScanDirs || []
+    var home = Quickshell.env("HOME") || "/home/rover"
+    var themeName = (root.lastThemeName || "").trim()
     var out = []
-    for (var i = 0; i < raw.length; i++) {
-      var dir = String(raw[i] || "").trim()
-      if (!dir) continue
-      if (dir === "~") dir = home
-      else if (dir.indexOf("~/") === 0) dir = home + dir.slice(1)
-      out.push(dir)
+
+    // 1. Current theme stock backgrounds
+    out.push(home + "/.local/state/omarchy/current/theme/backgrounds")
+
+    // 2. User backgrounds for the CURRENT theme specifically
+    if (themeName) {
+      out.push(home + "/.config/omarchy/backgrounds/" + themeName)
     }
+
+    // 3. User generic wallpapers directory (if present)
+    out.push(home + "/Pictures/Wallpapers")
+
     return out
   }
 
@@ -162,14 +316,22 @@ Item {
 
     var dirs = root.scanDirs()
     var parts = []
+    // Scan directories at maxdepth 1 so we never leak subdirectories of other themes
     for (var i = 0; i < dirs.length; i++) {
       var q = root.shellQuote(dirs[i])
-      parts.push("[ -d " + q + " ] && find " + q + " -maxdepth 2 -type f \\( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.avif' \\) -print")
+      parts.push("[ -d " + q + " ] && find -L " + q + " -maxdepth 1 -type f \\( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.avif' \\) -print")
     }
+
+    // Also include any loose wallpaper files placed directly in ~/.config/omarchy/backgrounds (depth 1 only!)
+    var home = Quickshell.env("HOME") || "/home/rover"
+    var baseUserBg = root.shellQuote(home + "/.config/omarchy/backgrounds")
+    parts.push("[ -d " + baseUserBg + " ] && find -L " + baseUserBg + " -maxdepth 1 -type f \\( -iname '*.png' -o -iname '*.jpg' -o -iname '*.jpeg' -o -iname '*.webp' -o -iname '*.avif' \\) -print")
+
     if (parts.length === 0) return
 
     // Canonical paths so the list can be compared against the live symlink
     // target (~/.local/state/omarchy/current/background).
+    root.scanEpoch = root.catalogueEpoch
     listProc.command = ["sh", "-c", parts.join("; ")
       + " | while IFS= read -r f; do readlink -f \"$f\"; done | sort -u"]
     listProc.running = true
@@ -181,16 +343,28 @@ Item {
 
   function indexOfPath(path) {
     if (!path) return -1
+    // 1. Exact canonical path match
     for (var i = 0; i < root.wallpapers.length; i++) {
       if (root.wallpapers[i].path === path) return i
+    }
+    // 2. Base filename match (handles symlink differences)
+    var base = root.baseName(path)
+    for (var j = 0; j < root.wallpapers.length; j++) {
+      if (root.wallpapers[j].name === base || root.baseName(root.wallpapers[j].path) === base) return j
     }
     return -1
   }
 
   function syncSelectionToActive() {
-    if (root.userNavigated) return
     var idx = root.indexOfPath(root.activePath)
-    if (idx >= 0) root.selectedIndex = idx
+    if (idx < 0) return
+    if (!root.userNavigated || idx !== root.selectedIndex) {
+      root.selectedIndex = idx
+      if (root.wallpapers[idx]) {
+        root.selectedPath = root.wallpapers[idx].path
+      }
+      Qt.callLater(root.revealSelection)
+    }
   }
 
   // instant = apply right now (pointer click, fresh key press, IPC hop).
@@ -223,7 +397,17 @@ Item {
     // Keyboard stepping never pins, so hovering out always retracts.
     if (pin === true) root.isPinned = true
     var count = root.wallpapers.length
-    root.select((root.selectedIndex + delta + count) % count, instant === true)
+
+    // If notch is closed or user hasn't actively navigated inside the strip,
+    // anchor stepping directly from the currently active desktop wallpaper
+    var baseIndex = root.selectedIndex
+    if (!root.isOpenEffective || !root.userNavigated) {
+      var activeIdx = root.indexOfPath(root.activePath)
+      if (activeIdx >= 0) baseIndex = activeIdx
+    }
+
+    var target = (baseIndex + delta + count) % count
+    root.select(target, instant === true)
   }
 
   function nextWallpaper(instant) {
@@ -239,10 +423,36 @@ Item {
     root.select(edge === "start" ? 0 : root.wallpapers.length - 1, true)
   }
 
+  // Keeps the selection inside the visible window: nudge the window by one
+  // only when the selection crosses an edge, then let the strip slide.
+  function maxWindowStart() {
+    return Math.max(0, root.wallpapers.length - root.visibleThumbs)
+  }
+
   function revealSelection() {
-    if (filmstrip && filmstrip.count > 0) {
-      filmstrip.positionViewAtIndex(root.selectedIndex, ListView.Contain)
+    if (root.wallpapers.length === 0) {
+      root.windowStart = 0
+      return
     }
+    var visible = root.visibleThumbs
+    var start = Math.max(0, Math.min(root.windowStart, root.maxWindowStart()))
+    if (root.selectedIndex < start) start = root.selectedIndex
+    else if (root.selectedIndex > start + visible - 1) start = root.selectedIndex - visible + 1
+    root.windowStart = Math.max(0, Math.min(start, root.maxWindowStart()))
+    root.slideStrip()
+  }
+
+  // Animate the strip by exactly one slot. The delegates cross-fade and pop
+  // using their distance past the window edge (see `presence` below), so the
+  // arriving wallpaper grows in as the departing one shrinks away.
+  function slideStrip() {
+    if (!filmstrip) return
+    var target = root.windowStart * root.thumbSlotWidth
+    if (Math.abs(filmstrip.contentX - target) < 0.5) return
+    stripSlide.stop()
+    stripSlide.from = filmstrip.contentX
+    stripSlide.to = target
+    stripSlide.start()
   }
 
   // -------------------------------------------------------------------------
@@ -270,6 +480,13 @@ Item {
     if (applyProc.running || !root.applyQueued) return
     var path = root.applyQueued
     root.applyQueued = ""
+    // A path that is no longer in the catalogue belongs to the previous theme
+    // (the theme dir is swapped in place, so filenames are reusable). Applying
+    // it would repaint that old wallpaper, so rescan instead.
+    if (root.indexOfPath(path) < 0) {
+      root.refreshWallpapers(true)
+      return
+    }
     root.applyInFlight = path
 
     // $1 = canonical original (the state symlink the color engine watches)
@@ -311,6 +528,13 @@ Item {
     stdout: StdioCollector {
       waitForEnd: true
       onStreamFinished: {
+        // A scan started before the theme changed must never publish the old
+        // theme's catalogue (the filenames are identical, only the bytes move).
+        if (root.scanEpoch !== root.catalogueEpoch) {
+          root.scanQueued = false
+          root.refreshWallpapers(true)
+          return
+        }
         var lines = String(text || "").split("\n")
         var list = []
         for (var i = 0; i < lines.length; i++) {
@@ -336,6 +560,9 @@ Item {
         }
         root.lastScanAt = Date.now()
         root.syncSelectionToActive()
+        // Twins are keyed by file content, so this is what regenerates them
+        // after a theme switch even when the filenames did not change.
+        root.warmDecodeCache()
 
         // A keybind/IPC step may have arrived before the catalogue was ready.
         if (root.pendingStep !== 0 && list.length > 0) {
@@ -380,6 +607,7 @@ Item {
   // -------------------------------------------------------------------------
   property var fastPaths: ({})
   property string cacheWarmKey: ""
+  property int cacheWarmEpoch: -1
   readonly property string cacheDir: (Quickshell.env("HOME") || "/home/rover")
     + "/.cache/lumania/wallpapers"
 
@@ -391,8 +619,11 @@ Item {
 
   function warmDecodeCache() {
     if (!root.frameConfig.wallpaperDecodeCacheEnabled) return
-    if (cacheWarmProc.running || root.wallpapers.length === 0) return
-    var key = ""
+    if (root.wallpapers.length === 0) return
+    // Never burn the key while another warm is in flight: its handler asks
+    // again for whatever catalogue is current when it exits.
+    if (cacheWarmProc.running) return
+    var key = root.catalogueEpoch + "|"
     var args = []
     for (var i = 0; i < root.wallpapers.length; i++) {
       var p = root.wallpapers[i].path
@@ -401,6 +632,7 @@ Item {
     }
     if (key === root.cacheWarmKey) return
     root.cacheWarmKey = key
+    root.cacheWarmEpoch = root.catalogueEpoch
 
     var script = "cache=\"$1\"; shift; mkdir -p \"$cache\" || exit 0; "
       + "min=" + root.frameConfig.wallpaperDecodeCacheMinBytes + "; "
@@ -411,7 +643,8 @@ Item {
       + "  [ -f \"$p\" ] || continue; "
       + "  size=$(stat -c %s \"$p\" 2>/dev/null || echo 0); "
       + "  [ \"$size\" -lt \"$min\" ] 2>/dev/null && continue; "
-      + "  key=$(printf '%s|%s|%s' \"$p\" \"$size\" \"$(stat -c %Y \"$p\" 2>/dev/null)\" | md5sum | cut -c1-16); "
+      + "  key=$(md5sum \"$p\" 2>/dev/null | cut -c1-16); "
+      + "  [ -n \"$key\" ] || continue; "
       + "  out=\"$cache/$key.jpg\"; "
       + "  if [ ! -s \"$out\" ]; then "
       + "    magick \"$p\" -auto-orient -resize \"${w}x${h}^\" -gravity center -extent \"${w}x${h}\" -quality \"$q\" \"$out\" >/dev/null 2>&1 || { rm -f \"$out\"; continue; }; "
@@ -479,6 +712,7 @@ Item {
       root.userNavigated = false
       root.syncSelectionToActive()
       root.refreshWallpapers()
+      Qt.callLater(root.revealSelection)
       Qt.callLater(function() {
         if (keyCatcher) keyCatcher.forceActiveFocus()
       })
@@ -495,6 +729,19 @@ Item {
   readonly property int visibleThumbs: Math.max(1, Math.min(
     root.wallpapers.length > 0 ? root.wallpapers.length : root.frameConfig.wallpaperMaxVisibleThumbs,
     root.frameConfig.wallpaperMaxVisibleThumbs))
+
+  // Distance one wallpaper advances the strip (cell + gap).
+  readonly property real thumbSlotWidth: root.frameConfig.wallpaperThumbWidth
+    + root.frameConfig.wallpaperThumbSpacing
+
+  // One-slot slide of the filmstrip when the visible window advances.
+  NumberAnimation {
+    id: stripSlide
+    target: filmstrip
+    property: "contentX"
+    duration: root.reduceMotion ? 0 : root.frameConfig.wallpaperStripSlideDuration
+    easing.type: Easing.OutCubic
+  }
 
   readonly property real targetExpandedWidth: Math.max(root.collapsedWidth,
     root.frameConfig.wallpaperContentPadding * 2
@@ -907,146 +1154,175 @@ Item {
         + ((1.0 - root.frameConfig.wallpaperContentScaleFrom) * root.progressNorm)
       transformOrigin: Item.Bottom
 
-      ListView {
-        id: filmstrip
-        anchors.fill: parent
+      // The strip is a fixed window of visibleThumbs slots; extra wallpapers
+      // live inside the flickable and slide in/out one at a time.
+      readonly property real stripWidth: root.visibleThumbs * root.frameConfig.wallpaperThumbWidth
+        + Math.max(0, root.visibleThumbs - 1) * root.frameConfig.wallpaperThumbSpacing
 
-        orientation: ListView.Horizontal
-        spacing: root.frameConfig.wallpaperThumbSpacing
-        clip: false
-        boundsBehavior: Flickable.StopAtBounds
-        model: root.wallpapers
-        currentIndex: root.selectedIndex
-        cacheBuffer: root.frameConfig.wallpaperCacheBuffer
-        reuseItems: true
+      // Clip a little wider than the strip (half the thumb gap at most) so the
+      // selected thumb's ring can overflow without revealing the next wallpaper.
+      Item {
+        id: stripClip
+        anchors.centerIn: parent
+        width: expandedView.stripWidth + 12
+        height: parent.height
+        clip: true
 
-        delegate: Item {
-          id: thumbDelegate
+        ListView {
+          id: filmstrip
+          anchors.centerIn: parent
+          width: expandedView.stripWidth
+          height: parent.height
 
-          readonly property var entry: modelData
-          readonly property int itemIndex: index
-          readonly property bool isSelected: itemIndex === root.selectedIndex
-          readonly property bool isApplied: Boolean(entry) && entry.path === root.activePath
+          orientation: ListView.Horizontal
+          spacing: root.frameConfig.wallpaperThumbSpacing
+          clip: false
+          boundsBehavior: Flickable.StopAtBounds
+          model: root.wallpapers
+          currentIndex: root.selectedIndex
+          cacheBuffer: root.frameConfig.wallpaperCacheBuffer
+          reuseItems: true
 
-          width: root.frameConfig.wallpaperThumbWidth
-          height: filmstrip.height
+          delegate: Item {
+            id: thumbDelegate
 
-          Item {
-            id: thumbFrame
-            anchors.centerIn: parent
+            readonly property var entry: modelData
+            readonly property int itemIndex: index
+            readonly property bool isSelected: itemIndex === root.selectedIndex
+            readonly property bool isApplied: Boolean(entry) && entry.path === root.activePath
+
+            // 1 = fully inside the visible window, 0 = pushed past an edge.
+            // The strip slides one slot at a time, so the wallpaper arriving on
+            // one side grows/fades in while the one leaving the far side shrinks.
+            readonly property real presence: {
+              var vx = thumbDelegate.x - filmstrip.contentX
+              var overflow = Math.max(0,
+                Math.max(-vx, (vx + thumbDelegate.width) - expandedView.stripWidth))
+              return Math.max(0, Math.min(1,
+                1.0 - overflow / (root.frameConfig.wallpaperThumbWidth * 0.55)))
+            }
+
             width: root.frameConfig.wallpaperThumbWidth
-            height: root.frameConfig.wallpaperThumbHeight
+            height: filmstrip.height
 
-            FluidSpring {
-              id: thumbSpring
-              target: thumbDelegate.isSelected
-                ? root.frameConfig.wallpaperSelectedScale
-                : (thumbArea.containsMouse ? root.frameConfig.wallpaperHoverScale : 1.0)
-              response: root.frameConfig.wallpaperThumbHoverResponse
-              dampingFraction: root.frameConfig.wallpaperThumbHoverDamping
-              epsilon: root.frameConfig.wallpaperSpringEpsilon
-              reduceMotion: root.reduceMotion
-              value: 1.0
-            }
-
-            scale: thumbSpring.value
-
-            // Rounded plate: the placeholder the thumb fades in over.
-            Rectangle {
-              anchors.fill: parent
-              radius: root.frameConfig.wallpaperThumbRadius
-              color: root.frameConfig.wallpaperThumbBg
-            }
-
-            // Rounded GPU mask. It must stay rendered for the effect to sample
-            // it, but it is never painted itself (visible: false) — leaving it
-            // visible is what used to flash a grey card on a decoding thumb.
-            Rectangle {
-              id: thumbMask
-              anchors.fill: parent
-              radius: root.frameConfig.wallpaperThumbRadius
-              color: "#ffffff"
-              visible: false
-              layer.enabled: true
-            }
-
-            // Stable layer around the image so recycling a delegate never tears
-            // down the effect, and the fade-in happens inside the mask.
             Item {
-              anchors.fill: parent
-              layer.enabled: true
-              layer.smooth: true
-              layer.effect: MultiEffect {
-                maskEnabled: true
-                maskSource: thumbMask
+              id: thumbFrame
+              anchors.centerIn: parent
+              width: root.frameConfig.wallpaperThumbWidth
+              height: root.frameConfig.wallpaperThumbHeight
+
+              FluidSpring {
+                id: thumbSpring
+                target: thumbDelegate.isSelected
+                  ? root.frameConfig.wallpaperSelectedScale
+                  : (thumbArea.containsMouse ? root.frameConfig.wallpaperHoverScale : 1.0)
+                response: root.frameConfig.wallpaperThumbHoverResponse
+                dampingFraction: root.frameConfig.wallpaperThumbHoverDamping
+                epsilon: root.frameConfig.wallpaperSpringEpsilon
+                reduceMotion: root.reduceMotion
+                value: 1.0
               }
 
-              Image {
-                id: thumbImage
-                anchors.fill: parent
-                source: root.fileUrl(thumbDelegate.entry
-                  ? root.fastPathFor(thumbDelegate.entry.path) : "")
-                sourceSize.width: root.frameConfig.wallpaperThumbWidth
-                  * root.frameConfig.wallpaperThumbSourceScale
-                sourceSize.height: root.frameConfig.wallpaperThumbHeight
-                  * root.frameConfig.wallpaperThumbSourceScale
-                fillMode: Image.PreserveAspectCrop
-                asynchronous: true
-                cache: true
-                smooth: true
+              scale: thumbSpring.value * (0.82 + 0.18 * thumbDelegate.presence)
+              opacity: thumbDelegate.presence
 
-                // Never show a half-decoded frame: the plate stays until the
-                // pixels exist, then the thumb fades in. No grey, no stutter.
-                opacity: status === Image.Ready ? 1 : 0
-                onStatusChanged: {
-                  console.log("[LUMANIA-THUMB]", thumbDelegate.itemIndex, "status=" + status, "source=" + source)
+              // Rounded plate: the placeholder the thumb fades in over.
+              Rectangle {
+                anchors.fill: parent
+                radius: root.frameConfig.wallpaperThumbRadius
+                color: root.frameConfig.wallpaperThumbBg
+              }
+
+              // Rounded GPU mask. It must stay rendered for the effect to sample
+              // it, but it is never painted itself (visible: false) — leaving it
+              // visible is what used to flash a grey card on a decoding thumb.
+              Rectangle {
+                id: thumbMask
+                anchors.fill: parent
+                radius: root.frameConfig.wallpaperThumbRadius
+                color: "#ffffff"
+                visible: false
+                layer.enabled: true
+              }
+
+              // Stable layer around the image so recycling a delegate never tears
+              // down the effect, and the fade-in happens inside the mask.
+              Item {
+                anchors.fill: parent
+                layer.enabled: true
+                layer.smooth: true
+                layer.effect: MultiEffect {
+                  maskEnabled: true
+                  maskSource: thumbMask
                 }
-                Behavior on opacity {
-                  NumberAnimation {
-                    duration: root.frameConfig.wallpaperThumbFadeDuration
-                    easing.type: Easing.OutCubic
+
+                Image {
+                  id: thumbImage
+                  anchors.fill: parent
+                  source: thumbDelegate.entry
+                    ? root.thumbUrl(thumbDelegate.entry.path) : ""
+                  sourceSize.width: root.frameConfig.wallpaperThumbWidth
+                    * root.frameConfig.wallpaperThumbSourceScale
+                  sourceSize.height: root.frameConfig.wallpaperThumbHeight
+                    * root.frameConfig.wallpaperThumbSourceScale
+                  fillMode: Image.PreserveAspectCrop
+                  asynchronous: true
+                  cache: true
+                  smooth: true
+
+                  // Never show a half-decoded frame: the plate stays until the
+                  // pixels exist, then the thumb fades in. No grey, no stutter.
+                  opacity: status === Image.Ready ? 1 : 0
+                  onStatusChanged: {
+                    console.log("[LUMANIA-THUMB]", thumbDelegate.itemIndex, "status=" + status, "source=" + source)
+                  }
+                  Behavior on opacity {
+                    NumberAnimation {
+                      duration: root.frameConfig.wallpaperThumbFadeDuration
+                      easing.type: Easing.OutCubic
+                    }
                   }
                 }
               }
-            }
 
-            // Hover wash (under the ring so the ring stays crisp)
-            Rectangle {
-              anchors.fill: parent
-              radius: root.frameConfig.wallpaperThumbRadius
-              color: root.frameConfig.wallpaperItemHoverBg
-              opacity: (thumbArea.containsMouse && !thumbDelegate.isSelected) ? 1 : 0
+              // Hover wash (under the ring so the ring stays crisp)
+              Rectangle {
+                anchors.fill: parent
+                radius: root.frameConfig.wallpaperThumbRadius
+                color: root.frameConfig.wallpaperItemHoverBg
+                opacity: (thumbArea.containsMouse && !thumbDelegate.isSelected) ? 1 : 0
 
-              Behavior on opacity { NumberAnimation { duration: 150 } }
-            }
+                Behavior on opacity { NumberAnimation { duration: 150 } }
+              }
 
-            // Selection ring / live-wallpaper frame / rest hairline.
-            // The live wallpaper is marked by a border, never by a dot.
-            Rectangle {
-              anchors.fill: parent
-              radius: root.frameConfig.wallpaperThumbRadius
-              color: "transparent"
-              border.width: thumbDelegate.isSelected
-                ? root.frameConfig.wallpaperSelectedBorderWidth
-                : (thumbDelegate.isApplied
-                  ? root.frameConfig.wallpaperAppliedBorderWidth
-                  : 1)
-              border.color: thumbDelegate.isSelected
-                ? root.frameConfig.wallpaperThumbActiveBorder
-                : (thumbDelegate.isApplied
-                  ? root.frameConfig.wallpaperAppliedBorderColor
-                  : (thumbArea.containsMouse ? root.frameConfig.wallpaperThumbHoverBorder
-                                             : root.frameConfig.wallpaperThumbBorder))
+              // Selection ring / live-wallpaper frame / rest hairline.
+              // The live wallpaper is marked by a border, never by a dot.
+              Rectangle {
+                anchors.fill: parent
+                radius: root.frameConfig.wallpaperThumbRadius
+                color: "transparent"
+                border.width: thumbDelegate.isSelected
+                  ? root.frameConfig.wallpaperSelectedBorderWidth
+                  : (thumbDelegate.isApplied
+                    ? root.frameConfig.wallpaperAppliedBorderWidth
+                    : 1)
+                border.color: thumbDelegate.isSelected
+                  ? root.frameConfig.wallpaperThumbActiveBorder
+                  : (thumbDelegate.isApplied
+                    ? root.frameConfig.wallpaperAppliedBorderColor
+                    : (thumbArea.containsMouse ? root.frameConfig.wallpaperThumbHoverBorder
+                                               : root.frameConfig.wallpaperThumbBorder))
 
-              Behavior on border.color { ColorAnimation { duration: 150 } }
-            }
+                Behavior on border.color { ColorAnimation { duration: 150 } }
+              }
 
-            MouseArea {
-              id: thumbArea
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.select(thumbDelegate.itemIndex, true)
+              MouseArea {
+                id: thumbArea
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.select(thumbDelegate.itemIndex, true)
+              }
             }
           }
         }
@@ -1064,7 +1340,7 @@ Item {
             required property var modelData
             width: 0
             height: 0
-            source: root.fileUrl(root.fastPathFor(modelData.path))
+            source: modelData ? root.thumbUrl(modelData.path) : ""
             sourceSize.width: root.frameConfig.wallpaperThumbWidth
               * root.frameConfig.wallpaperThumbSourceScale
             sourceSize.height: root.frameConfig.wallpaperThumbHeight

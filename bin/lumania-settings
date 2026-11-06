@@ -1,0 +1,16 @@
+#!/bin/bash
+TARGET="$(readlink -f "${BASH_SOURCE[0]}")"
+DIR="$(cd "$(dirname "$TARGET")" && pwd)"
+ROOT="$(cd "$DIR/.." && pwd)"
+
+if [ -x "$DIR/lumania-app-bin" ]; then
+  exec "$DIR/lumania-app-bin" "$@"
+elif [ -x "$ROOT/app/target/release/lumania-app" ]; then
+  exec "$ROOT/app/target/release/lumania-app" "$@"
+elif [ -x "$ROOT/app/target/debug/lumania-app" ]; then
+  exec "$ROOT/app/target/debug/lumania-app" "$@"
+else
+  echo "lumania-app binary not found. Building with cargo..."
+  cargo build --release --manifest-path "$ROOT/app/Cargo.toml"
+  exec "$ROOT/app/target/release/lumania-app" "$@"
+fi

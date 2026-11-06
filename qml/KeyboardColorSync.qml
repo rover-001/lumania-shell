@@ -21,7 +21,7 @@ Item {
   readonly property color tone: root.frameConfig ? root.frameConfig.activeBorderColor : "#ffffff"
   readonly property string toneHex: root.toHex(root.tone)
 
-  readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("lumania-keyboard").toString().replace(/^file:\/\//, ""))
+  readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("../bin/lumania-keyboard").toString().replace(/^file:\/\//, ""))
 
   // Backend state, reported by `lumania-keyboard --probe`
   property bool supported: false

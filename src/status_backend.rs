@@ -482,7 +482,12 @@ fn main() {
                 return;
             }
             "--rescan-wifi" => {
-                let _ = Command::new("nmcli").args(["dev", "wifi", "rescan"]).status();
+                // Wait for NetworkManager to complete a fresh scan before the
+                // control panel immediately requests the updated status JSON.
+                let _ = run_cmd(&[
+                    "nmcli", "-t", "-f", "in-use,ssid,signal,security",
+                    "dev", "wifi", "list", "--rescan", "yes"
+                ]);
                 return;
             }
             "--toggle-bt" => {

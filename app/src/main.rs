@@ -676,7 +676,7 @@ impl LumaniaAppView {
                                     .flex()
                                     .flex_row()
                                     .gap_1()
-                                    .children([5, 7, 9].into_iter().map(|cnt| {
+                                    .children([4, 5, 7].into_iter().map(|cnt| {
                                         let sel = thumbs_cnt == cnt;
                                         div()
                                             .id(("thumbs-cnt", cnt))

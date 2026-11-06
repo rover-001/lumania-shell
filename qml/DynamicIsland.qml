@@ -87,7 +87,7 @@ Item {
 
   Process {
     id: callStatusProc
-    command: [decodeURIComponent(Qt.resolvedUrl("lumania-call-status").toString().replace(/^file:\/\//, ""))]
+    command: [decodeURIComponent(Qt.resolvedUrl("../bin/lumania-call-status").toString().replace(/^file:\/\//, ""))]
     stdout: StdioCollector {
       onStreamFinished: {
         var str = String(text || "").trim()
@@ -1549,7 +1549,7 @@ Item {
         TapHandler {
           id: cutTap
           onTapped: {
-            Quickshell.execDetached([decodeURIComponent(Qt.resolvedUrl("lumania-call-cut").toString().replace(/^file:\/\//, ""))])
+            Quickshell.execDetached([decodeURIComponent(Qt.resolvedUrl("../bin/lumania-call-cut").toString().replace(/^file:\/\//, ""))])
             root.inCall = false
           }
         }

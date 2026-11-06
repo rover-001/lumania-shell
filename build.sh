@@ -1,18 +1,20 @@
 #!/bin/bash
 set -e
 cd "$(dirname "$0")"
+mkdir -p bin
+
 echo "Compiling native PipeWire visualizer..."
-rustc -O visualizer.rs -o lumania-vis
+rustc -O src/visualizer.rs -o bin/lumania-vis
 
 echo "Compiling native Wallpaper Color Engine..."
-rustc -O wallpaper_colors.rs -o lumania-colors
+rustc -O src/wallpaper_colors.rs -o bin/lumania-colors
 
 echo "Compiling native System Status & Network Engine..."
-rustc -O status_backend.rs -o lumania-status
+rustc -O src/status_backend.rs -o bin/lumania-status
 
 echo "Compiling native GPUI Settings & Update App..."
-(cd lumania-app && cargo build --release)
-cp lumania-app/target/release/lumania-app ./lumania-app-bin
-chmod +x ./lumania-app-bin
+cargo build --release --manifest-path app/Cargo.toml
+cp app/target/release/lumania-app bin/lumania-app-bin
+chmod +x bin/lumania-app-bin
 
-echo "Build complete: lumania-vis, lumania-colors, lumania-status, and lumania-app"
+echo "Build complete: bin/lumania-vis, bin/lumania-colors, bin/lumania-status, and bin/lumania-app-bin"

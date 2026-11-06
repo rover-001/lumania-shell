@@ -188,7 +188,7 @@ Item {
   // -------------------------------------------------------------------------
   // System State: Wi-Fi / Bluetooth (native Rust backend)
   // -------------------------------------------------------------------------
-  readonly property string backendScript: decodeURIComponent(Qt.resolvedUrl("lumania-status").toString().replace(/^file:\/\//, ""))
+  readonly property string backendScript: decodeURIComponent(Qt.resolvedUrl("../bin/lumania-status").toString().replace(/^file:\/\//, ""))
 
   property var wifiData: ({
     enabled: true,
@@ -218,6 +218,7 @@ Item {
   })
 
   property bool isRescanningWifi: false
+  property double lastWifiScan: 0
   property double lastBtScan: 0
   property string debugTab: ""
 
@@ -299,8 +300,20 @@ Item {
   }
 
   function rescanWifi() {
+    if (!root.wifiData.enabled || statusActionProc.running) return
+    var now = Date.now()
+    if (now - root.lastWifiScan < 25000) return
+    root.lastWifiScan = now
     root.isRescanningWifi = true
     runStatusAction(["--rescan-wifi"])
+  }
+
+  function scanBluetoothIfNeeded() {
+    if (!root.btData.enabled || statusActionProc.running) return
+    var now = Date.now()
+    if (now - root.lastBtScan < 15000) return
+    root.lastBtScan = now
+    root.runStatusAction(["--scan-bt"])
   }
 
   function connectWifi(ssid, password) {
@@ -332,14 +345,11 @@ Item {
     if (!statusSubpanel) return
     statusSubpanel.openTab(tab)
     root.refreshStatus()
+    if (tab === "wifi") root.rescanWifi()
     // Bluetooth needs active discovery running to surface nearby devices that
     // were never paired, so kick a scan whenever the panel is summoned. Rate
     // limited because the hover sync re-enters this on every pointer move.
-    if (tab === "bluetooth" && !statusActionProc.running && root.btData.enabled
-        && (Date.now() - root.lastBtScan) > 15000) {
-      root.lastBtScan = Date.now()
-      root.runStatusAction(["--scan-bt"])
-    }
+    if (tab === "bluetooth") root.scanBluetoothIfNeeded()
   }
 
   function togglePinStatusTab(tab) {
@@ -520,6 +530,24 @@ Item {
         root.refreshStatus()
       }
     }
+  }
+
+  Timer {
+    id: wifiScanTimer
+    interval: 30000
+    running: Boolean(statusSubpanel && statusSubpanel.isOpen
+      && statusSubpanel.activeTab === "wifi" && root.wifiData.enabled)
+    repeat: true
+    onTriggered: root.rescanWifi()
+  }
+
+  Timer {
+    id: bluetoothScanTimer
+    interval: 15000
+    running: Boolean(statusSubpanel && statusSubpanel.isOpen
+      && statusSubpanel.activeTab === "bluetooth" && root.btData.enabled)
+    repeat: true
+    onTriggered: root.scanBluetoothIfNeeded()
   }
 
   onIsOpenEffectiveChanged: {

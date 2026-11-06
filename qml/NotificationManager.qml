@@ -330,7 +330,7 @@ Item {
       "LUMANIA_FOCUS_SUMMARY": String(summary || "")
     }
     focusAppProc.command = [
-      decodeURIComponent(Qt.resolvedUrl("lumania-focus").toString().replace(/^file:\/\//, ""))
+      decodeURIComponent(Qt.resolvedUrl("../bin/lumania-focus").toString().replace(/^file:\/\//, ""))
     ]
     focusAppProc.running = true
   }

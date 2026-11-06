@@ -1,0 +1,26 @@
+{
+  "bar": {
+    "centerAnchor": "omarchy.clock",
+    "id": "lumania.island",
+    "layout": {
+      "center": [
+        { "id": "omarchy.indicators" },
+        { "id": "omarchy.clock" },
+        { "id": "omarchy.weather" },
+        { "id": "omarchy.system-update" }
+      ],
+      "left": [
+        { "id": "omarchy.menu" },
+        { "id": "omarchy.workspaces" }
+      ],
+      "right": [
+        { "id": "omarchy.tray" },
+        { "id": "omarchy.bluetooth" },
+        { "id": "omarchy.network" },
+        { "id": "omarchy.audio" },
+        { "id": "omarchy.power" }
+      ]
+    },
+    "position": "top"
+  }
+}

@@ -64,7 +64,9 @@ impl UpdateManager {
         ];
 
         for c in candidates {
-            if c.join("manifest.json").exists() && c.join("DynamicIsland.qml").exists() {
+            if c.join("manifest.json").exists()
+                && (c.join("qml/DynamicIsland.qml").exists() || c.join("DynamicIsland.qml").exists())
+            {
                 if let Ok(canon) = fs::canonicalize(&c) {
                     return canon;
                 }

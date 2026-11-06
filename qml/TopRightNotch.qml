@@ -34,7 +34,7 @@ Item {
   readonly property real bottomCornerRadius: frameConfig ? frameConfig.trayNotchBottomCornerRadius : 15
   readonly property real itemSize: 26
   readonly property real itemRadius: 7
-  readonly property real itemSpacing: 6
+  readonly property real itemSpacing: 12
   readonly property real sidePadding: 12
 
   // Mask and wake items exposed to PanelWindow

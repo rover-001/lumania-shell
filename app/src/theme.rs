@@ -135,6 +135,10 @@ impl AppTheme {
     fn extract_or_load_cached() -> ExtractedColors {
         // Priority 1: Call native lumania-colors engine (sub-1ms cache check, auto-extracts on wallpaper change)
         let candidate_paths = [
+            PathBuf::from("./bin/lumania-colors"),
+            PathBuf::from("../bin/lumania-colors"),
+            dirs_home().join(".config/omarchy/plugins/lumania.island/bin/lumania-colors"),
+            dirs_home().join("Projects/lumania shell/bin/lumania-colors"),
             PathBuf::from("./lumania-colors"),
             PathBuf::from("../lumania-colors"),
             dirs_home().join(".config/omarchy/plugins/lumania.island/lumania-colors"),

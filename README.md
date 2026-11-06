@@ -26,17 +26,31 @@ Lumania replaces the Omarchy bar with a thin frame around your screen plus a set
 
 | Where | File | What it does |
 | --- | --- | --- |
-| Top center | `DynamicIsland.qml` | Clock, now-playing media (MPRIS) with album art, controls and an audio visualizer, notifications |
-| Top left | `TopLeftNotch.qml` | Power menu: lock, logout, suspend, reboot, shutdown |
-| Top right | `TopRightNotch.qml` | System tray |
-| Workspaces | `WorkspaceNotch.qml` | Hyprland workspace switcher |
-| Bottom center | `BottomSearchNotch.qml` | App launcher / search |
-| Bottom left | `WallpaperNotch.qml` | Wallpaper picker; shell colors follow the wallpaper |
-| Bottom right | `ControlCenterNotch.qml` | Wi-Fi, Bluetooth, volume, brightness, battery, power profile |
+| Top center | `qml/DynamicIsland.qml` | Clock, now-playing media (MPRIS) with album art, controls and an audio visualizer, notifications |
+| Top left | `qml/TopLeftNotch.qml` | Power menu: lock, logout, suspend, reboot, shutdown |
+| Top right | `qml/TopRightNotch.qml` | System tray |
+| Workspaces | `qml/WorkspaceNotch.qml` | Hyprland workspace switcher |
+| Bottom center | `qml/BottomSearchNotch.qml` | App launcher / search |
+| Bottom left | `qml/WallpaperNotch.qml` | Wallpaper picker; shell colors follow the wallpaper |
+| Bottom right | `qml/ControlCenterNotch.qml` | Wi-Fi, Bluetooth, volume, brightness, battery, power profile |
 
 The wallpaper tone also drives the keyboard backlight where the hardware exposes writable RGB (see [Keyboard backlight sync](#keyboard-backlight-sync)).
 
-Entry point is `IslandBar.qml` (registered as the Omarchy bar plugin `lumania.island` in `manifest.json`).
+Entry point is `qml/IslandBar.qml` (registered as the Omarchy bar plugin `lumania.island` in `manifest.json`).
+
+## Repository layout
+
+```
+lumania shell/
+├── manifest.json      # Omarchy plugin manifest (bar entry point)
+├── qml/               # Quickshell UI: frame, island, notches, windows
+├── bin/               # runtime executables (native helpers + launcher wrappers)
+├── src/               # Rust sources for the native helpers
+├── app/               # GPUI settings & updates app (Cargo project)
+├── assets/            # screenshots and logo
+├── packaging/         # .desktop entry
+└── build.sh           # rebuilds every native helper into bin/
+```
 
 ## Requirements
 
@@ -56,13 +70,13 @@ omarchy plugin add https://github.com/rover-001/lumania-shell.git --enable
 
 This clones the plugin into `~/.config/omarchy/plugins/lumania.island` and makes it the active bar. Plugins land disabled until you enable them, so you can drop `--enable` and read the code first, then run `omarchy plugin enable lumania.island`.
 
-**2. Helpers.** Prebuilt x86_64 binaries ship in the repo:
-- `lumania-vis` reads audio from PipeWire and drives the visualizer
-- `lumania-colors` picks accent colors from the current wallpaper
-- `lumania-status` reports Wi-Fi, Bluetooth and battery state to the control center
-- `lumania-settings` native Rust + GPUI companion app for shell settings and updates
+**2. Helpers.** Prebuilt x86_64 binaries ship in `bin/`:
+- `bin/lumania-vis` reads audio from PipeWire and drives the visualizer
+- `bin/lumania-colors` picks accent colors from the current wallpaper
+- `bin/lumania-status` reports Wi-Fi, Bluetooth and battery state to the control center
+- `bin/lumania-settings` native Rust + GPUI companion app for shell settings and updates
 
-`lumania-keyboard` is a plain bash helper (no build step) that pushes the wallpaper tone onto the keyboard backlight.
+`bin/lumania-keyboard` is a plain bash helper (no build step) that pushes the wallpaper tone onto the keyboard backlight.
 
 The plugin calls them from its own folder, wherever it is installed. To rebuild them from source (another architecture, or after editing a `.rs` file):
 
@@ -77,7 +91,7 @@ cd ~/.config/omarchy/plugins/lumania.island && ./build.sh
 ```bash
 mkdir -p ~/.local/bin
 for s in lumania-search lumania-wallpaper lumania-focus lumania-settings; do
-  ln -sf ~/.config/omarchy/plugins/lumania.island/$s ~/.local/bin/$s
+  ln -sf ~/.config/omarchy/plugins/lumania.island/bin/$s ~/.local/bin/$s
 done
 ```
 
@@ -105,13 +119,13 @@ omarchy-shell lumania.control status wifi   # or bluetooth, audio
 
 ## Configuration
 
-Colors, frame thickness, corner radii and panel sizes live in `FrameConfig.qml`. Set `dynamicWallpaperColor: false` there to use the fixed `borderColor` / `textColor` instead of wallpaper-derived colors.
+Colors, frame thickness, corner radii and panel sizes live in `qml/FrameConfig.qml`. Set `dynamicWallpaperColor: false` there to use the fixed `borderColor` / `textColor` instead of wallpaper-derived colors.
 
 After editing, run `omarchy restart shell`. If you change a `.rs` file, re-run `./build.sh`.
 
 ## Keyboard backlight sync
 
-`KeyboardColorSync.qml` pushes the same tone the frame and island use (`activeBorderColor`) onto the keyboard backlight. Turn it off with `syncKeyboardColor: false` in `FrameConfig.qml`.
+`qml/KeyboardColorSync.qml` pushes the same tone the frame and island use (`activeBorderColor`) onto the keyboard backlight. Turn it off with `syncKeyboardColor: false` in `qml/FrameConfig.qml`.
 
 Keyboards are not interchangeable, so all hardware knowledge lives in the `lumania-keyboard` helper. On start the shell asks it `--probe`, and if the answer is "nothing writable here" the backlight is never touched:
 
@@ -133,7 +147,7 @@ LUMANIA_KEYBOARD_TARGET=/sys/class/leds/rgb:kbd_backlight   # optional; force a 
 Check what a machine reports:
 
 ```bash
-~/.config/omarchy/plugins/lumania.island/lumania-keyboard --probe
+~/.config/omarchy/plugins/lumania.island/bin/lumania-keyboard --probe
 ```
 
 Brightness is respected: the OMEN driver scales the tone by the keyboard's own brightness, so screen-following dimming keeps working. Wallpaper switches coalesce into one hardware write (~350 ms debounce), and an identical tone is never rewritten. A board that is not supported is polled every 15 s, so plugging in a supported keyboard lights it up without restarting the shell.

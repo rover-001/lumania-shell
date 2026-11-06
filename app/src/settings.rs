@@ -45,7 +45,7 @@ impl Default for LumaniaSettings {
             corner_radius: 16,
             island_body_width: 206,
             wallpaper_instant_switch: false,
-            wallpaper_max_visible_thumbs: 7,
+            wallpaper_max_visible_thumbs: 4,
         }
     }
 }
