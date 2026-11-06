@@ -1722,11 +1722,10 @@ Item {
     borderThickness: root.borderThickness
     fontFamily: root.fontFamily
     anchors.right: notchContainer.left
-    // Overlap the card's own flare inset so the subpanel's contact edge lands
-    // exactly on the visible left edge of the open card (seamless unibody).
-    anchors.rightMargin: -frameConfig.controlExpandedFlareRadius
+    // Keep the contact edge aligned with the card's left-side flare.
+    anchors.rightMargin: -(frameConfig.controlExpandedFlareRadius + 4)
     anchors.top: notchContainer.top
-    anchors.topMargin: root.borderThickness + 10
+    anchors.topMargin: 16
 
     wifiData: root.wifiData
     btData: root.btData
