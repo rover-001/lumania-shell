@@ -511,16 +511,10 @@ Item {
     if (!motionPreferenceProc.running) motionPreferenceProc.running = true
   }
 
-  Component.onCompleted: {
-    root.refreshAll()
-    root.refreshStatus()
-    root.refreshMotionPreference()
-  }
-
   Timer {
     id: statusPollTimer
     interval: root.isOpenEffective ? 2500 : 8000
-    running: true
+    running: root.isOpenEffective
     repeat: true
     onTriggered: {
       if (!root.isDraggingSlider) {
@@ -806,7 +800,7 @@ Item {
       readonly property real fillet: Math.max(0, Math.min(frameConfig.controlInnerRadius,
                                                           stripTop - tabTop))
       readonly property real rCorner: Math.max(0, Math.min(frameConfig.controlCornerRadius,
-                                                           (h - stripTop) * 0.55))
+                                                           (h - stripTop) * 0.85))
       readonly property real stripEnd: Math.max(rCorner, w - tabW - fillet)
 
       ShapePath {
@@ -919,8 +913,8 @@ Item {
         PathCubic {
           x: notchShape.w - notchShape.effRfTop
           y: 0
-          control1X: notchShape.w
-          control1Y: -notchShape.effRfTop * 0.5
+          control1X: notchShape.w - (notchShape.effRfTop * 0.45)
+          control1Y: -notchShape.effRfTop
           control2X: notchShape.w - (notchShape.effRfTop * 0.5)
           control2Y: 0
         }

@@ -272,7 +272,8 @@ fn main() {
         return;
     }
 
-    // Daemon mode: periodically checks if wallpaper path or timestamp changed
+    // Daemon mode: one inexpensive metadata check replaces repeated helper
+    // launches from QML while keeping wallpaper color updates responsive.
     let mut last_path = String::new();
     let mut last_mtime = None;
 
@@ -291,6 +292,6 @@ fn main() {
                 }
             }
         }
-        thread::sleep(Duration::from_millis(1500));
+        thread::sleep(Duration::from_millis(500));
     }
 }

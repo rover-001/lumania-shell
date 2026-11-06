@@ -64,10 +64,10 @@ QtObject {
   // - topRightRadius: curves right border into top border
   // - bottomLeftRadius: curves left border into bottom border
   // - bottomRightRadius: curves right border into bottom border
-  property real topLeftRadius: 16
-  property real topRightRadius: 16
-  property real bottomLeftRadius: 16
-  property real bottomRightRadius: 16
+  property real topLeftRadius: 24
+  property real topRightRadius: 24
+  property real bottomLeftRadius: 24
+  property real bottomRightRadius: 24
 
   // Corner curvature style:
   // - "squircle": Apple G1 continuous cubic bezier (gentle ramp, fluid unibody feel)
@@ -75,7 +75,7 @@ QtObject {
   property string cornerStyle: "squircle"
 
   // Squircle tension factor (0.35 - 0.65; 0.52 is Apple standard squircle)
-  property real squircleFactor: 0.52
+  property real squircleFactor: 0.5523
 
   // =========================================================================
   // DYNAMIC ISLAND CONSTANTS (TOP NOTCH)
@@ -83,8 +83,8 @@ QtObject {
   property int islandBodyWidth: 206
   property int islandTopCurveRadius: 10             // Top fillet radius when closed
   property int islandExpandedTopCurveRadius: 14     // Top fillet radius when opened
-  property int islandBottomCornerRadius: 15         // Bottom corner radius when closed
-  property int islandExpandedBottomCornerRadius: 28 // Bottom corner radius when opened
+  property int islandBottomCornerRadius: 20         // Bottom corner radius when closed
+  property int islandExpandedBottomCornerRadius: 32 // Bottom corner radius when opened
   property int islandHoverWidthDelta: 140           // Width expansion on hover
   property int islandHoverHeightDeltaIdle: 46       // Height expansion when idle (fits 48px circular status buttons)
   property int islandHoverHeightDeltaMedia: 24      // Height expansion when media playing (fits media controls)
@@ -97,8 +97,8 @@ QtObject {
   property real trayNotchHoverHeightDelta: 5        // Subtle height expansion on hover (+5px down to 42px)
   property real trayNotchTopCurveRadius: 10         // Concave shoulder flare radius
   property real trayNotchExpandedTopCurveRadius: 12 // Concave shoulder flare radius when hovered
-  property real trayNotchBottomCornerRadius: 15     // Convex bottom corner radius
-  property real trayNotchExpandedBottomCornerRadius: 18 // Bottom corner radius when hovered
+  property real trayNotchBottomCornerRadius: 20     // Convex bottom corner radius
+  property real trayNotchExpandedBottomCornerRadius: 24 // Bottom corner radius when hovered
   property real trayNotchItemSize: 28               // Square squircle slot for tray and plugin buttons
   property real trayNotchItemRadius: 8              // Squircle radius for items
   property real trayNotchItemSpacing: 6             // Spacing between icons
@@ -141,7 +141,7 @@ QtObject {
   // Lip length: how far the resting gusset reaches left along the bottom
   property real controlCollapsedWidth: 110
   // Finger width: the part merged into the right border
-  property real controlRightTabWidth: 10
+  property real controlRightTabWidth: 12
   // Panel width when the control menu is open
   property real controlExpandedWidth: 312
 
@@ -154,11 +154,11 @@ QtObject {
   property real controlExpandedHeight: 252
 
   // ---- CURVES / RADII -----------------------------------------------------
-  property real controlTabCapRadius: 5
+  property real controlTabCapRadius: 7
   property real controlInnerRadius: 12
-  property real controlCornerRadius: 10
+  property real controlCornerRadius: 16
   property real controlFlareRadius: 12
-  property real controlExpandedCornerRadius: 20
+  property real controlExpandedCornerRadius: 38
   property real controlExpandedFlareRadius: 12
   property real controlCurveTension: 0.55
 
@@ -181,7 +181,7 @@ QtObject {
   property real controlSubpanelWidth: 300          // Subpanel width (Wi-Fi / Bluetooth / DNS views)
   property real controlSubpanelHeight: 236         // Subpanel height
   property real controlSubpanelFlareRadius: 20     // Concave flare melting into the control card edge
-  property real controlSubpanelCornerRadius: 22    // Free-end rounded corners
+  property real controlSubpanelCornerRadius: 26    // Free-end rounded corners
 
   // =========================================================================
   // TOP-LEFT WORKSPACE NOTCH CONSTANTS (VERTICAL 1-COLUMN ON LEFT BORDER)
@@ -200,7 +200,7 @@ QtObject {
   property real workspaceItemSpacing: 12            // Vertical rhythm between workspace numbers
   property real workspaceRailPadding: 32            // Top/bottom breathing room inside the notch
   // Corner and concave flare radii
-  property real workspaceCornerRadius: 16
+  property real workspaceCornerRadius: 20
   property real workspaceFlareRadius: 12
   // Animation durations and physics
   property int workspaceOpenDuration: 340         // ms, iOS energetic spring open
@@ -213,7 +213,7 @@ QtObject {
   property real statusSubpanelWidth: 320            // Total width of dropdown subpanel
   property real statusSubpanelHeight: 220           // Total height of dropdown subpanel
   property real statusSubpanelFlareRadius: 16       // Concave flare radius curving toward left-top & right-top
-  property real statusSubpanelBottomRadius: 20      // Bottom rounded corner radius of subpanel
+  property real statusSubpanelBottomRadius: 24      // Bottom rounded corner radius of subpanel
   property real statusSubpanelTopMargin: -4         // Vertical overlap with bottom of Dynamic Island
   property color statusSubpanelBg: activeBorderColor
   property color statusSubpanelBorder: Qt.rgba(0, 0, 0, 0.15)
@@ -234,7 +234,7 @@ QtObject {
   // Lip length: how far the resting gusset reaches right along the bottom
   property real searchCollapsedWidth: 110
   // Finger width: the part merged into the left border
-  property real searchLeftTabWidth: 10
+  property real searchLeftTabWidth: 12
   // Panel width when the search is open
   property real searchExpandedWidth: 660
 
@@ -248,15 +248,15 @@ QtObject {
 
   // ---- CURVES / RADII -----------------------------------------------------
   // Rounded cap on the finger's free end (0 = square top)
-  property real searchTabCapRadius: 5
+  property real searchTabCapRadius: 7
   // Inner concave radius where the finger melts into the lip (the "C" mouth)
   property real searchInnerRadius: 12
   // Free (right) end of the resting lip
-  property real searchCornerRadius: 10
+  property real searchCornerRadius: 16
   // Concave merger of the resting gusset into the left + bottom borders
   property real searchFlareRadius: 12
   // Same two radii once the panel is open
-  property real searchExpandedCornerRadius: 26
+  property real searchExpandedCornerRadius: 28
   property real searchExpandedFlareRadius: 20
   // Bezier tension of every concave flare (0.55 default, lower = tighter curve)
   property real searchCurveTension: 0.55
@@ -264,7 +264,7 @@ QtObject {
   // ---- SAFETY CLAMPS (advanced: keep the outline from ever self-crossing) --
   property real searchTabWidthMaxRatio: 0.25       // finger width <= notch width * this
   property real searchLipFlareMaxRatio: 0.4        // right flare <= lip height * this
-  property real searchLipCornerRatio: 0.55         // lip-end corner <= lip height * this
+  property real searchLipCornerRatio: 0.85         // lip-end corner <= lip height * this
   property real searchTopEdgeGuardRatio: 0.22      // keeps the top edge from inverting
 
   // ---- MOTION -------------------------------------------------------------
@@ -317,7 +317,7 @@ QtObject {
 
   // ---- HEIGHT (measured above the border band; borderThickness is added) ---
   // Resting lip rise (mirrors the island protrusion)
-  property real wallpaperCollapsedHeight: 10
+  property real wallpaperCollapsedHeight: 14
   // Panel rise when the filmstrip is open
   property real wallpaperExpandedHeight: 118
 
@@ -325,10 +325,10 @@ QtObject {
   // Shoulder flare where the lip melts into the bottom band (= island top curve)
   property real wallpaperFlareRadius: 10
   // Free-edge corner radius (= island bottom corner radius, mirrored)
-  property real wallpaperCornerRadius: 15
+  property real wallpaperCornerRadius: 20
   // Same two radii once the panel is open
   property real wallpaperExpandedFlareRadius: 22
-  property real wallpaperExpandedCornerRadius: 36
+  property real wallpaperExpandedCornerRadius: 40
   // Flare bezier pull: 0.5 is the exact island flare, lower = tighter shoulder
   property real wallpaperFlareControlRatio: 0.5
   // Overlap into the border band so the seam can never show a hairline (px)

@@ -95,7 +95,7 @@ Item {
         y: root.t
         control1X: root.w
         control1Y: root.t + root.r * (1.0 - root.k)
-        control2X: root.r * root.k
+        control2X: root.r * (1.0 - root.k)
         control2Y: root.t
       }
 
@@ -175,7 +175,7 @@ Item {
         y: root.r
         control1X: root.w
         control1Y: root.r * root.k
-        control2X: root.r * root.k
+        control2X: root.r * (1.0 - root.k)
         control2Y: root.r
       }
 

@@ -91,9 +91,9 @@ Item {
     root.syncWorkspaceState()
   }
 
-  // Slow safety-net poll; Hyprland events drive the fast path
+  // Slow safety-net poll; Hyprland events drive the fast path.
   Timer {
-    interval: 1500
+    interval: 5000
     running: true
     repeat: true
     onTriggered: root.syncWorkspaceState()

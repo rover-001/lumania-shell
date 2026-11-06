@@ -390,6 +390,7 @@ Item {
   function step(delta, instant, pin) {
     if (root.wallpapers.length === 0) {
       root.pendingStep = delta
+      root.syncActiveWallpaper()
       root.refreshWallpapers(true)
       return
     }
@@ -697,12 +698,6 @@ Item {
 
   function refreshMotionPreference() {
     if (!motionPreferenceProc.running) motionPreferenceProc.running = true
-  }
-
-  Component.onCompleted: {
-    root.syncActiveWallpaper()
-    root.refreshMotionPreference()
-    root.refreshWallpapers(true)
   }
 
   onIsOpenEffectiveChanged: {

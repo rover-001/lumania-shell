@@ -44,7 +44,7 @@ Item {
       root.shell.appLibrary.refreshIcons()
     }
     root.loadRecentApps()
-    refreshApps()
+    ensureAppsLoaded()
     Qt.callLater(function() {
       if (searchInput) {
         searchInput.forceActiveFocus()
@@ -80,7 +80,7 @@ Item {
         root.shell.appLibrary.refreshIcons()
       }
       root.loadRecentApps()
-      refreshApps()
+      ensureAppsLoaded()
       if (typeof scrollSpring !== "undefined" && scrollSpring) {
         scrollSpring.snapTo(0)
       }
@@ -144,6 +144,7 @@ Item {
   // -------------------------------------------------------------------------
   property var allApps: []
   property var filteredApps: []
+  property bool appsLoaded: false
   property var recentAppIds: []
   property var recentAppsList: []
   property int selectedIndex: 0
@@ -341,7 +342,12 @@ Item {
     })
 
     root.allApps = list
+    root.appsLoaded = true
     updateFilter()
+  }
+
+  function ensureAppsLoaded() {
+    if (!root.appsLoaded) root.refreshApps()
   }
 
   function updateFilter() {
@@ -526,15 +532,10 @@ Item {
   }
 
 
-  Component.onCompleted: {
-    loadRecentApps()
-    refreshApps()
-  }
-
   Connections {
     target: DesktopEntries.applications
     function onValuesChanged() {
-      root.refreshApps()
+      if (root.appsLoaded) root.refreshApps()
     }
   }
 
@@ -613,7 +614,7 @@ Item {
             root.shell.appLibrary.refreshIcons()
           }
           root.loadRecentApps()
-          root.refreshApps()
+          root.ensureAppsLoaded()
           Qt.callLater(function() {
             if (searchInput) searchInput.forceActiveFocus()
           })
@@ -769,6 +770,7 @@ Item {
       readonly property real effRfL: Math.max(0.5, rFlare)
       readonly property real effRfR: Math.min(rFlare, Math.max(0.5, protrusion * frameConfig.searchLipFlareMaxRatio))
       readonly property real effRc: Math.max(0, Math.min(rCorner, protrusion - effRfR))
+      readonly property real cornerK: 0.5523
       // Horizontal guard: keep the top edge from inverting on narrow widths
       readonly property real topStart: Math.min(effRfL, w * frameConfig.searchTopEdgeGuardRatio)
       readonly property real topEnd: Math.max(topStart + 1, w - effRfR - effRc)
@@ -798,8 +800,8 @@ Item {
           x: notchShape.topStart
           y: 0
           control1X: 0
-          control1Y: -notchShape.effRfL * notchShape.slack
-          control2X: notchShape.topStart * frameConfig.searchCurveTension
+          control1Y: -notchShape.effRfL * (1.0 + notchShape.slack)
+          control2X: notchShape.topStart * notchShape.slack
           control2Y: 0
         }
 
@@ -809,13 +811,14 @@ Item {
           y: 0
         }
 
-        // Free top-right convex corner arc
-        PathArc {
+        // Free top-right convex corner with a tangent-matched quarter-circle
+        PathCubic {
           x: notchShape.topEnd + notchShape.effRc
           y: notchShape.effRc
-          radiusX: Math.max(1, notchShape.effRc)
-          radiusY: Math.max(1, notchShape.effRc)
-          direction: PathArc.Clockwise
+          control1X: notchShape.topEnd + (notchShape.effRc * notchShape.cornerK)
+          control1Y: 0
+          control2X: notchShape.topEnd + notchShape.effRc
+          control2Y: notchShape.effRc * (1.0 - notchShape.cornerK)
         }
 
         // Right side down to the bottom border's top edge

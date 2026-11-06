@@ -20,9 +20,10 @@ Item {
     onFileChanged: settingsWatch.reload()
   }
 
-  // Backup active poll timer so settings update immediately with zero latency (<300ms)
+  // Keep a slow fallback for missed filesystem notifications. Normal updates
+  // arrive through FileView.onFileChanged without waiting for this poll.
   Timer {
-    interval: 300
+    interval: 2000
     repeat: true
     running: true
     onTriggered: settingsWatch.reload()

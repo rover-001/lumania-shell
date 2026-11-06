@@ -514,7 +514,7 @@ Item {
         Loader {
           id: whimsyLoader
           anchors.fill: parent
-          active: true
+          active: false
           source: Quickshell.env("HOME") + "/.config/omarchy/plugins/whimsy/BarWidget.qml"
           visible: true
           opacity: 0
@@ -557,6 +557,7 @@ Item {
         HoverHandler {
           id: whimsyHover
           cursorShape: Qt.PointingHandCursor
+          onHoveredChanged: if (hovered) whimsyLoader.active = true
         }
 
         MouseArea {
