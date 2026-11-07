@@ -107,7 +107,7 @@ Item {
     anchors.top: parent.top
     anchors.horizontalCenter: notchContainer.horizontalCenter
     width: notchContainer.width
-    height: root.borderThickness + 14
+    height: root.borderThickness
 
     HoverHandler {
       id: edgeTriggerHover

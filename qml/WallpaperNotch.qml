@@ -900,9 +900,8 @@ Item {
     id: wakeZone
     anchors.horizontalCenter: parent.horizontalCenter
     anchors.bottom: parent.bottom
-    width: root.wakeZoneActive
-      ? Math.max(root.frameConfig.wallpaperWakeZoneWidth, root.collapsedWidth) : 0
-    height: root.wakeZoneActive ? root.borderThickness + root.frameConfig.wallpaperWakeZoneHeight : 0
+    width: root.wakeZoneActive ? root.collapsedWidth : 0
+    height: root.wakeZoneActive ? root.borderThickness : 0
 
     // Waking the retracted lip is a HOVER, never an explicit open: a sticky
     // open here used to leave the panel stuck on screen after the pointer left.

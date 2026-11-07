@@ -714,7 +714,7 @@ Item {
       anchors.right: parent.right
       anchors.bottomMargin: -notchContainer.currentRetractOffset
       width: Math.max(64, root.collapsedWidth)
-      height: root.borderThickness + 14
+      height: root.borderThickness
 
       HoverHandler {
         id: cornerTriggerHover

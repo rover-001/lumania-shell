@@ -211,7 +211,7 @@ Item {
       anchors.left: parent.left
       anchors.top: parent.top
       anchors.bottom: parent.bottom
-      width: 28
+      width: root.borderThickness
 
       HoverHandler {
         id: edgeTriggerHover

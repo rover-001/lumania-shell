@@ -345,7 +345,7 @@ Item {
     anchors.top: parent.top
     anchors.horizontalCenter: parent.horizontalCenter
     width: root.islandWidth
-    height: root.borderThickness + 14
+    height: root.borderThickness
 
     HoverHandler {
       id: edgeTriggerHover

@@ -34,6 +34,7 @@ Item {
     || (!root.hoverSuppressed && (root.isHoverOpen || root.isHovered))
     || root.isTyping
 
+
   signal openRequested()
   signal closeRequested()
 
@@ -590,7 +591,7 @@ Item {
       anchors.left: parent.left
       anchors.bottomMargin: -notchContainer.currentRetractOffset
       width: Math.max(64, root.collapsedWidth)
-      height: root.borderThickness + 14
+      height: root.borderThickness
 
       HoverHandler {
         id: edgeTriggerHover

@@ -5,3 +5,6 @@
 AGENTS.md
 agents.md
 app/target/
+.agents/
+skills-lock.json
+
