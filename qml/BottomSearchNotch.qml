@@ -941,9 +941,24 @@ Item {
               font.pixelSize: 14
               font.weight: Font.Normal
               color: frameConfig.activeTextColor
+              maximumLength: 4096
               selectionColor: frameConfig.activeSliderIconColorFilled
               selectedTextColor: "#ffffff"
               clip: true
+
+              BoundedPaste {
+                id: searchPaste
+                targetInput: searchInput
+              }
+
+              Keys.onPressed: function(event) {
+                var controlPaste = (event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V
+                var insertPaste = (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert
+                if (controlPaste || insertPaste) {
+                  searchPaste.paste()
+                  event.accepted = true
+                }
+              }
 
               onTextChanged: {
                 root.filterQuery = text

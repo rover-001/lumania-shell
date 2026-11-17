@@ -435,15 +435,32 @@ fn main() {
     // forwarded to the shell so the UI can tell a wrong key from a success.
     let connect_wifi = |ssid: &str, password: Option<String>| -> i32 {
         let mut cmd = Command::new("nmcli");
-        cmd.args(["dev", "wifi", "connect", ssid]);
-        if let Some(pw) = password {
-            if !pw.is_empty() {
-                cmd.arg("password").arg(pw);
+        if let Some(pw) = password.filter(|value| !value.is_empty()) {
+            use std::io::Write;
+            use std::process::Stdio;
+
+            cmd.args(["--ask", "dev", "wifi", "connect", ssid])
+                .stdin(Stdio::piped());
+            match cmd.spawn() {
+                Ok(mut child) => {
+                    let write_result = child.stdin.take().map(|mut input| {
+                        writeln!(input, "802-11-wireless-security.psk:{pw}")
+                    });
+                    if write_result.is_some_and(|result| result.is_err()) {
+                        let _ = child.kill();
+                        let _ = child.wait();
+                        return 1;
+                    }
+                    child.wait().ok().and_then(|status| status.code()).unwrap_or(1)
+                }
+                Err(_) => 1,
             }
-        }
-        match cmd.status() {
-            Ok(status) => status.code().unwrap_or(1),
-            Err(_) => 1,
+        } else {
+            cmd.args(["dev", "wifi", "connect", ssid]);
+            match cmd.status() {
+                Ok(status) => status.code().unwrap_or(1),
+                Err(_) => 1,
+            }
         }
     };
 

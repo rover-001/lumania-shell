@@ -12,8 +12,15 @@ Item {
   property bool mprisPlaying: false
   property bool nonMprisPlaying: false
 
-  // Track artwork (file://, /path, or https from MPRIS) for the circular cover
+  // Keep artwork local so untrusted player URLs cannot make the shared shell
+  // buffer an unbounded network response.
   property string artUrl: ""
+
+  function safeArtworkSource(url) {
+    var value = String(url || "")
+    if (value.startsWith("file:///") || value.startsWith("/")) return value
+    return ""
+  }
 
   // Filter out calls, communication streams, and players without track metadata
   function isCallOrComm(p) {
@@ -144,13 +151,13 @@ Item {
       // Some players (Chromium / YouTube) publish a temporary artwork path a beat
       // before the file is written, so a failed decode is retried a few times
       // instead of leaving the glyph fallback up for the whole track.
-      property string artSource: root.artUrl
+      property string artSource: root.safeArtworkSource(root.artUrl)
       property int retriesLeft: 10
 
       Connections {
         target: root
         function onArtUrlChanged() {
-          artSlot.artSource = root.artUrl
+          artSlot.artSource = root.safeArtworkSource(root.artUrl)
           artSlot.retriesLeft = 10
           artRetryTimer.stop()
         }
@@ -161,7 +168,7 @@ Item {
         interval: 250
         repeat: false
         onTriggered: {
-          var u = root.artUrl
+          var u = root.safeArtworkSource(root.artUrl)
           artSlot.artSource = ""
           Qt.callLater(function() { artSlot.artSource = u })
         }

@@ -3,6 +3,7 @@ import QtQuick.Layouts
 import QtQuick.Controls
 import QtQuick.Shapes
 import Quickshell
+import Quickshell.Io
 
 // ===========================================================================
 // Control Center Status Subpanel (Wi-Fi / Bluetooth)
@@ -540,9 +541,24 @@ Item {
               enabled: !root.passwordBusy
               font.family: root.fontFamily
               font.pixelSize: 11
+              maximumLength: 128
               color: "#ffffff"
               selectionColor: Qt.rgba(255, 255, 255, 0.35)
               selectedTextColor: "#ffffff"
+
+              BoundedPaste {
+                id: wifiPasswordPaste
+                targetInput: wifiPasswordInput
+              }
+
+              Keys.onPressed: function(event) {
+                var controlPaste = (event.modifiers & Qt.ControlModifier) && event.key === Qt.Key_V
+                var insertPaste = (event.modifiers & Qt.ShiftModifier) && event.key === Qt.Key_Insert
+                if (controlPaste || insertPaste) {
+                  wifiPasswordPaste.paste()
+                  event.accepted = true
+                }
+              }
 
               onTextChanged: root.passwordText = text
               onAccepted: root.submitWifiPassword()
