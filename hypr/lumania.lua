@@ -8,6 +8,20 @@
 --   require("hypr.lumania")
 -- =============================================================================
 
+local function is_lumania_enabled()
+  local home = os.getenv("HOME")
+  if not home then return false end
+  local f = io.open(home .. "/.config/omarchy/shell.json", "r")
+  if not f then return false end
+  local content = f:read("*a")
+  f:close()
+  return content:find('"id"%s*:%s*"lumania%.island"') ~= nil
+end
+
+if not is_lumania_enabled() then
+  return
+end
+
 -- Search Notch (Super + Space)
 hl.unbind("SUPER + SPACE")
 o.bind("SUPER + SPACE", "Lumania Search", "lumania-search")

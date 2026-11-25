@@ -127,7 +127,11 @@ Item {
     root.shellEnabled = next
     root.saveMessage = next ? "Enabling Lumania shell…" : "Disabling Lumania shell…"
     if (!next) root.close()
-    shellToggleProc.command = ["omarchy", "plugin", next ? "enable" : "disable", "lumania.island"]
+    if (next) {
+      shellToggleProc.command = ["sh", "-c", "omarchy plugin enable lumania.island && hyprctl reload"]
+    } else {
+      shellToggleProc.command = ["sh", "-c", "omarchy plugin enable omarchy.notifications >/dev/null 2>&1; omarchy plugin disable lumania.island && hyprctl reload"]
+    }
     shellToggleProc.running = true
   }
 
