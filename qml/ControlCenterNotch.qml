@@ -308,12 +308,18 @@ Item {
     runStatusAction(["--rescan-wifi"])
   }
 
+  Process {
+    id: btScanProc
+    command: [root.backendScript, "--scan-bt"]
+    onExited: root.refreshStatus()
+  }
+
   function scanBluetoothIfNeeded() {
-    if (!root.btData.enabled || statusActionProc.running) return
+    if (!root.btData.enabled || btScanProc.running) return
     var now = Date.now()
-    if (now - root.lastBtScan < 15000) return
+    if (now - root.lastBtScan < 12000) return
     root.lastBtScan = now
-    root.runStatusAction(["--scan-bt"])
+    btScanProc.running = true
   }
 
   function connectWifi(ssid, password) {
@@ -359,6 +365,9 @@ Item {
     } else {
       statusSubpanel.openTab(tab)
       statusSubpanel.isPinned = true
+      root.refreshStatus()
+      if (tab === "wifi") root.rescanWifi()
+      if (tab === "bluetooth") root.scanBluetoothIfNeeded()
     }
   }
 
@@ -537,11 +546,20 @@ Item {
 
   Timer {
     id: bluetoothScanTimer
-    interval: 15000
+    interval: 12000
     running: Boolean(statusSubpanel && statusSubpanel.isOpen
       && statusSubpanel.activeTab === "bluetooth" && root.btData.enabled)
     repeat: true
     onTriggered: root.scanBluetoothIfNeeded()
+  }
+
+  Timer {
+    id: btRefreshTimer
+    interval: 2000
+    running: Boolean(statusSubpanel && statusSubpanel.isOpen
+      && statusSubpanel.activeTab === "bluetooth" && root.btData.enabled)
+    repeat: true
+    onTriggered: root.refreshStatus()
   }
 
   onIsOpenEffectiveChanged: {
@@ -1038,7 +1056,7 @@ Item {
 
               FluidSpring {
                 id: wifiPressSpring
-                target: btnWifi.isPressed ? 0.90 : (wifiArea.containsMouse ? 1.08 : 1.0)
+                target: btnWifi.isPressed ? 0.90 : 1.0
                 response: btnWifi.isPressed ? 0.18 : 0.30
                 dampingFraction: btnWifi.isPressed ? 1.0 : 0.78
                 epsilon: 0.0004
@@ -1086,7 +1104,7 @@ Item {
 
               FluidSpring {
                 id: btPressSpring
-                target: btnBluetooth.isPressed ? 0.90 : (btArea.containsMouse ? 1.08 : 1.0)
+                target: btnBluetooth.isPressed ? 0.90 : 1.0
                 response: btnBluetooth.isPressed ? 0.18 : 0.30
                 dampingFraction: btnBluetooth.isPressed ? 1.0 : 0.78
                 epsilon: 0.0004
@@ -1140,7 +1158,7 @@ Item {
 
               FluidSpring {
                 id: nlPressSpring
-                target: btnNightLight.isPressed ? 0.90 : (nlArea.containsMouse ? 1.08 : 1.0)
+                target: btnNightLight.isPressed ? 0.90 : 1.0
                 response: btnNightLight.isPressed ? 0.18 : 0.30
                 dampingFraction: btnNightLight.isPressed ? 1.0 : 0.78
                 epsilon: 0.0004
@@ -1187,7 +1205,7 @@ Item {
 
               FluidSpring {
                 id: focusPressSpring
-                target: btnFocus.isPressed ? 0.90 : (focusArea.containsMouse ? 1.08 : 1.0)
+                target: btnFocus.isPressed ? 0.90 : 1.0
                 response: btnFocus.isPressed ? 0.18 : 0.30
                 dampingFraction: btnFocus.isPressed ? 1.0 : 0.78
                 epsilon: 0.0004
@@ -1431,7 +1449,7 @@ Item {
 
             FluidSpring {
               id: dnsPressSpring
-              target: btnDns.isPressed ? 0.90 : (dnsArea.containsMouse ? 1.08 : 1.0)
+              target: btnDns.isPressed ? 0.90 : 1.0
               response: btnDns.isPressed ? 0.18 : 0.30
               dampingFraction: btnDns.isPressed ? 1.0 : 0.78
               epsilon: 0.0004
@@ -1478,7 +1496,7 @@ Item {
 
             FluidSpring {
               id: recordPressSpring
-              target: btnRecord.isPressed ? 0.90 : (recordArea.containsMouse ? 1.08 : 1.0)
+              target: btnRecord.isPressed ? 0.90 : 1.0
               response: btnRecord.isPressed ? 0.18 : 0.30
               dampingFraction: btnRecord.isPressed ? 1.0 : 0.78
               epsilon: 0.0004
@@ -1524,7 +1542,7 @@ Item {
 
             FluidSpring {
               id: lpPressSpring
-              target: lpArea.pressed ? 0.90 : (lpArea.containsMouse ? 1.08 : 1.0)
+              target: lpArea.pressed ? 0.90 : 1.0
               response: lpArea.pressed ? 0.18 : 0.30
               dampingFraction: lpArea.pressed ? 1.0 : 0.78
               epsilon: 0.0004
@@ -1570,7 +1588,7 @@ Item {
 
             FluidSpring {
               id: balPressSpring
-              target: balArea.pressed ? 0.90 : (balArea.containsMouse ? 1.08 : 1.0)
+              target: balArea.pressed ? 0.90 : 1.0
               response: balArea.pressed ? 0.18 : 0.30
               dampingFraction: balArea.pressed ? 1.0 : 0.78
               epsilon: 0.0004
@@ -1616,7 +1634,7 @@ Item {
 
             FluidSpring {
               id: perfPressSpring
-              target: perfArea.pressed ? 0.90 : (perfArea.containsMouse ? 1.08 : 1.0)
+              target: perfArea.pressed ? 0.90 : 1.0
               response: perfArea.pressed ? 0.18 : 0.30
               dampingFraction: perfArea.pressed ? 1.0 : 0.78
               epsilon: 0.0004

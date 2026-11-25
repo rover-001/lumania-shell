@@ -2,7 +2,7 @@ use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 fn run_cmd(args: &[&str]) -> String {
     if args.is_empty() {
@@ -519,7 +519,19 @@ fn main() {
             }
             "--connect-bt" => {
                 if args.len() > 2 {
-                    let _ = Command::new("bluetoothctl").args(["connect", &args[2]]).status();
+                    let mac = &args[2];
+                    let info = run_cmd(&["bluetoothctl", "info", mac]);
+                    if !info.contains("Paired: yes") {
+                        let _ = Command::new("bluetoothctl")
+                            .args(["--timeout", "10", "pair", mac])
+                            .status();
+                        let _ = Command::new("bluetoothctl")
+                            .args(["trust", mac])
+                            .status();
+                    }
+                    let _ = Command::new("bluetoothctl")
+                        .args(["--timeout", "12", "connect", mac])
+                        .status();
                 }
                 return;
             }
@@ -531,9 +543,15 @@ fn main() {
             }
             "--scan-bt" => {
                 // Active discovery so nearby, not-yet-paired devices surface too.
-                let _ = Command::new("bluetoothctl")
-                    .args(["--timeout", "4", "scan", "on"])
-                    .spawn();
+                let show = run_cmd(&["bluetoothctl", "show"]);
+                if !show.contains("Discovering: yes") {
+                    let _ = Command::new("bluetoothctl")
+                        .args(["--timeout", "12", "scan", "on"])
+                        .stdin(Stdio::null())
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .spawn();
+                }
                 return;
             }
             "--set-dns" => {
