@@ -41,22 +41,6 @@ Item {
   property alias maskItem: activeRegionItem
   property alias wakeItem: edgeTriggerItem
 
-  // -------------------------------------------------------------------------
-  // 1. Whimsy Plugin Integration
-  // -------------------------------------------------------------------------
-  Process {
-    id: whimsyIpcProc
-    command: ["sh", "-c", "omarchy-shell whimsy toggle || omarchy-shell shell togglePopout whimsy 2>/dev/null"]
-  }
-
-  function toggleWhimsy() {
-    if (whimsyLoader.item && typeof whimsyLoader.item.togglePanel === "function") {
-      whimsyLoader.item.togglePanel()
-    } else {
-      whimsyIpcProc.running = true
-    }
-  }
-
   QtObject {
     id: pluginBarFacade
     property color foreground: root.textColor
@@ -308,19 +292,18 @@ Item {
   readonly property int trayCount: trayList.length
   readonly property int totalBgCount: bgAppCount + appletCount + trayCount
 
-  readonly property real pluginWidth: root.itemSize // Whimsy button
   readonly property real micWidth: root.itemSize     // Global Mic button
   readonly property real dividerWidth: 8            // 1px separator + padding
+  readonly property real shellMenuWidth: root.itemSize + root.dividerWidth
   readonly property real bgSectionWidth: totalBgCount > 0
     ? (totalBgCount * root.itemSize + (totalBgCount - 1) * root.itemSpacing)
     : 0
 
   readonly property real targetNotchWidth: (root.sidePadding * 2)
     + (root.topCurveRadius * 2)
-    + pluginWidth
-    + dividerWidth
     + micWidth
     + (totalBgCount > 0 ? (dividerWidth + bgSectionWidth) : 0)
+    + shellMenuWidth
 
   property real animatedWidth: targetNotchWidth
   Behavior on animatedWidth {
@@ -493,7 +476,7 @@ Item {
     }
 
     // -----------------------------------------------------------------------
-    // Content Layout: Whimsy Plugin | Global Mic Mute | Background Apps
+    // Content Layout: Global Mic Mute | Background Apps
     // -----------------------------------------------------------------------
     Row {
       id: contentRow
@@ -504,84 +487,7 @@ Item {
       opacity: Math.max(0.0, (root.revealProgress - 0.35) / 0.65)
       visible: opacity > 0
 
-      // SECTION 1: Whimsy Desktop Widgets Plugin Button
-      Item {
-        id: whimsyBtn
-        width: root.itemSize
-        height: root.itemSize
-        anchors.verticalCenter: parent.verticalCenter
-
-        Loader {
-          id: whimsyLoader
-          anchors.fill: parent
-          active: false
-          source: Quickshell.env("HOME") + "/.config/omarchy/plugins/whimsy/BarWidget.qml"
-          visible: true
-          opacity: 0
-          onLoaded: {
-            if (item) {
-              if ("bar" in item) item.bar = pluginBarFacade
-              if ("moduleName" in item) item.moduleName = "whimsy"
-              if ("settings" in item) item.settings = {}
-            }
-          }
-        }
-
-        property bool isHovered: whimsyHover.hovered
-        property bool isPressed: whimsyMouse.pressed
-
-        scale: isPressed ? 0.92 : 1.0
-        Behavior on scale {
-          NumberAnimation {
-            duration: whimsyBtn.isPressed ? 110 : 220
-            easing.type: whimsyBtn.isPressed ? Easing.OutQuad : Easing.OutBack
-            easing.overshoot: 1.15
-          }
-        }
-
-        Rectangle {
-          anchors.fill: parent
-          radius: root.itemRadius
-          color: whimsyBtn.isHovered ? Qt.rgba(255, 255, 255, 0.16) : "transparent"
-          Behavior on color { ColorAnimation { duration: 150 } }
-        }
-
-        Text {
-          anchors.centerIn: parent
-          text: "\u{F056E}"
-          font.family: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
-          font.pixelSize: 14
-          color: whimsyBtn.isHovered ? root.textColor : Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.88)
-        }
-
-        HoverHandler {
-          id: whimsyHover
-          cursorShape: Qt.PointingHandCursor
-          onHoveredChanged: if (hovered) whimsyLoader.active = true
-        }
-
-        MouseArea {
-          id: whimsyMouse
-          anchors.fill: parent
-          acceptedButtons: Qt.LeftButton | Qt.RightButton
-          cursorShape: Qt.PointingHandCursor
-          onClicked: {
-            root.toggleWhimsy()
-          }
-        }
-      }
-
-      // SECTION 2: Divider
-      Rectangle {
-        id: separator1
-        anchors.verticalCenter: parent.verticalCenter
-        width: 1
-        height: 12
-        radius: 0.5
-        color: Qt.rgba(255, 255, 255, 0.22)
-      }
-
-      // SECTION 3: Global Microphone Mute / Unmute Button
+      // SECTION 1: Global Microphone Mute / Unmute Button
       Item {
         id: micBtn
         width: root.itemSize
@@ -633,7 +539,7 @@ Item {
         }
       }
 
-      // SECTION 4: Divider before Background Apps (if any exist)
+      // SECTION 2: Divider before Background Apps (if any exist)
       Rectangle {
         id: separator2
         visible: root.totalBgCount > 0
@@ -644,7 +550,7 @@ Item {
         color: Qt.rgba(255, 255, 255, 0.22)
       }
 
-      // SECTION 5: Background Apps (Discord, Steam, Tailscale, Agents, SystemTray)
+      // SECTION 3: Background Apps (Discord, Steam, Tailscale, Agents, SystemTray)
       Row {
         id: bgAppsRow
         visible: root.totalBgCount > 0
@@ -826,6 +732,64 @@ Item {
           }
         }
       }
+
+      // Lumania plugin menu stays available even when no other tray items exist.
+      Rectangle {
+        id: shellMenuDivider
+        anchors.verticalCenter: parent.verticalCenter
+        width: 1
+        height: 12
+        radius: 0.5
+        color: Qt.rgba(255, 255, 255, 0.22)
+      }
+
+      Item {
+        id: shellMenuButton
+        width: root.itemSize
+        height: root.itemSize
+        anchors.verticalCenter: parent.verticalCenter
+
+        property bool isHovered: shellMenuMouse.containsMouse
+        property bool isPressed: shellMenuMouse.pressed
+
+        scale: isPressed ? 0.92 : 1.0
+        Behavior on scale {
+          NumberAnimation {
+            duration: shellMenuButton.isPressed ? 110 : 220
+            easing.type: shellMenuButton.isPressed ? Easing.OutQuad : Easing.OutBack
+            easing.overshoot: 1.15
+          }
+        }
+
+        Rectangle {
+          anchors.fill: parent
+          radius: root.itemRadius
+          color: shellMenuButton.isHovered || root.shellMenuOpen
+            ? Qt.rgba(255, 255, 255, 0.16)
+            : "transparent"
+          Behavior on color { ColorAnimation { duration: 150 } }
+        }
+
+        Text {
+          anchors.centerIn: parent
+          text: "\uf186"
+          font.family: "JetBrainsMono Nerd Font, Font Awesome 7 Free, sans-serif"
+          font.pixelSize: 14
+          color: shellMenuButton.isHovered ? root.textColor : Qt.rgba(root.textColor.r, root.textColor.g, root.textColor.b, 0.92)
+        }
+
+        MouseArea {
+          id: shellMenuMouse
+          anchors.fill: parent
+          acceptedButtons: Qt.LeftButton
+          hoverEnabled: true
+          cursorShape: Qt.PointingHandCursor
+          onClicked: {
+            root.close()
+            root.shellMenuOpen = !root.shellMenuOpen
+          }
+        }
+      }
     }
 
     // -----------------------------------------------------------------------
@@ -837,6 +801,7 @@ Item {
   property var activeTrayItem: null
   property var activeTrayAnchor: null
   property bool trayMenuOpen: false
+  property bool shellMenuOpen: false
   property var submenuStack: []
   readonly property int submenuDepth: submenuStack.length
   readonly property string currentTitle: submenuDepth > 0 ? submenuStack[submenuDepth - 1].title : ""
@@ -920,7 +885,16 @@ Item {
     root.resetTrayMenu()
     root.activeTrayItem = item
     root.activeTrayAnchor = anchor
+    root.shellMenuOpen = false
     root.trayMenuOpen = true
+  }
+
+  LumaniaTrayMenu {
+    anchorItem: shellMenuButton
+    bar: pluginBarFacade
+    frameConfig: root.frameConfig
+    open: root.shellMenuOpen
+    onDismissed: root.shellMenuOpen = false
   }
 
   QsMenuOpener {

@@ -74,7 +74,6 @@ This clones the plugin into `~/.config/omarchy/plugins/lumania.island` and makes
 - `bin/lumania-vis` reads audio from PipeWire and drives the visualizer
 - `bin/lumania-colors` picks accent colors from the current wallpaper
 - `bin/lumania-status` reports Wi-Fi, Bluetooth and battery state to the control center
-- `bin/lumania-settings` native Rust + GPUI companion app for shell settings and updates
 
 `bin/lumania-keyboard` is a plain bash helper (no build step) that pushes the wallpaper tone onto the keyboard backlight.
 
@@ -84,13 +83,13 @@ The plugin calls them from its own folder, wherever it is installed. To rebuild 
 cd ~/.config/omarchy/plugins/lumania.island && ./build.sh
 ```
 
-**Updating:** `omarchy plugin update lumania.island` or open `lumania-settings` and click "Update Now". **Removing:** `omarchy plugin remove lumania.island`.
+**Settings and updates:** open the Lumania moon icon in the top-right tray. **Removing:** `omarchy plugin remove lumania.island`.
 
 **3. (Optional) Put the launcher scripts on your PATH and bind keys.**
 
 ```bash
 mkdir -p ~/.local/bin
-for s in lumania-search lumania-wallpaper lumania-focus lumania-settings; do
+for s in lumania-search lumania-wallpaper lumania-focus; do
   ln -sf ~/.config/omarchy/plugins/lumania.island/bin/$s ~/.local/bin/$s
 done
 ```

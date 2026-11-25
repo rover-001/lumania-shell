@@ -1,9 +1,10 @@
 [Desktop Entry]
 Name=Lumania Shell
-Comment=Settings and updates companion for Lumania Shell
+Comment=Settings and updates are available from the Lumania top-right tray menu
 Exec=lumania-settings
 Icon=lumania
 Terminal=false
 Type=Application
 Categories=Settings;DesktopSettings;
 Keywords=lumania;shell;island;settings;update;
+NoDisplay=true
