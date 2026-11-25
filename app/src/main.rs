@@ -22,6 +22,18 @@ struct LumaniaAppView {
     settings: LumaniaSettings,
     update_mgr: UpdateManager,
     save_status: Option<String>,
+    shell_enabled: bool,
+}
+
+fn is_lumania_shell_enabled() -> bool {
+    let Ok(home) = std::env::var("HOME") else {
+        return false;
+    };
+    let path = std::path::PathBuf::from(home).join(".config/omarchy/shell.json");
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    content.contains("\"lumania.island\"")
 }
 
 impl LumaniaAppView {
@@ -51,12 +63,15 @@ impl LumaniaAppView {
         })
         .detach();
 
+        let shell_enabled = is_lumania_shell_enabled();
+
         Self {
             tab: ActiveTab::Settings,
             theme,
             settings,
             update_mgr,
             save_status: None,
+            shell_enabled,
         }
     }
 }
@@ -246,11 +261,91 @@ impl LumaniaAppView {
         let island_w = self.settings.island_body_width;
         let instant_wp = self.settings.wallpaper_instant_switch;
         let thumbs_cnt = self.settings.wallpaper_max_visible_thumbs;
+        let shell_enabled = self.shell_enabled;
 
         div()
             .flex()
             .flex_col()
             .gap_5()
+            // SECTION 0: Lumania Shell On/Off
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_3()
+                    .p_4()
+                    .rounded_2xl()
+                    .bg(card_bg)
+                    .border_1()
+                    .border_color(card_border)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_row()
+                            .justify_between()
+                            .items_center()
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_col()
+                                    .child(
+                                        div()
+                                            .text_sm()
+                                            .font_weight(FontWeight::BOLD)
+                                            .child("Lumania Shell"),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .text_color(text_muted)
+                                            .child(if shell_enabled {
+                                                "Active desktop shell. Turn off to restore default Omarchy bar."
+                                            } else {
+                                                "Disabled. Turn on to activate Lumania Shell."
+                                            }),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .id("lumania-shell-switch")
+                                    .w(px(52.))
+                                    .h(px(28.))
+                                    .rounded_full()
+                                    .p_1()
+                                    .cursor_pointer()
+                                    .when(shell_enabled, |s| s.bg(accent))
+                                    .when(!shell_enabled, |s| s.bg(rgba(0xffffff20)))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        let next = !this.shell_enabled;
+                                        this.shell_enabled = next;
+                                        this.save_status = Some(if next {
+                                            "Enabling Lumania Shell...".to_string()
+                                        } else {
+                                            "Restoring default Omarchy bar...".to_string()
+                                        });
+                                        cx.notify();
+                                        std::thread::spawn(move || {
+                                            let cmd = if next {
+                                                "omarchy plugin enable lumania.island && hyprctl reload"
+                                            } else {
+                                                "omarchy plugin enable omarchy.notifications >/dev/null 2>&1; omarchy plugin disable lumania.island && hyprctl reload"
+                                            };
+                                            let _ = std::process::Command::new("sh")
+                                                .args(["-c", cmd])
+                                                .status();
+                                        });
+                                    }))
+                                    .child(
+                                        div()
+                                            .size(px(20.))
+                                            .rounded_full()
+                                            .bg(rgb(0xffffff))
+                                            .when(shell_enabled, |s| s.ml(px(24.)))
+                                            .when(!shell_enabled, |s| s.ml(px(0.))),
+                                    ),
+                            ),
+                    ),
+            )
             // SECTION 1: Wallpaper & Color Engine
             .child(
                 div()
